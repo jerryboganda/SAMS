@@ -17,6 +17,14 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Dev-only proxy: forward /api/* to the Express server (server/src,
+      // port 5000) so the SPA can call same-origin `/api/v1/...` in dev too.
+      proxy: {
+        '/api': {
+          target: 'http://localhost:5000',
+          changeOrigin: true,
+        },
+      },
     },
   };
 });

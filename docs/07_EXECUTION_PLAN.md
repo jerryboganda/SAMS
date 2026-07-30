@@ -5,12 +5,12 @@
 **Frontend re-scope:** `client/` is already a finished UI exported from Google AI Studio (mock layer mirrors `04_API_SPEC.md` — see `CLAUDE.md §1a`). `CONFIG.USE_MOCK=false`, `API_BASE_URL="/api/v1"`. Every frontend-build sub-task below (Phases 3–11) is re-scoped from "build the UI" to **wire the exported UI to the real API + fix contract drift** — backend, security, and test sub-tasks are unchanged. Phase 13's QA matrix (`08_TESTING_QA.md`) applies unchanged.
 
 ## Phase 0 — Bootstrap (devops-docs)
-- [ ] 0.1 Init repo structure per 02_ARCHITECTURE §2; root `package.json` with workspaces or concurrently; `.gitignore` (.env, node_modules, storage/, client/dist). **AC:** tree matches spec; `git log` has init commit.
-- [ ] 0.2 Server skeleton: Express app, helmet/cors/cookies/json, `/api/v1/health` → `{success:true,data:{status:'ok',db:false}}`, central errorHandler + 404, winston logger, zod-validated env loader with safe defaults. **AC:** `curl /api/v1/health` returns envelope.
-- [ ] 0.3 Client skeleton: Vite React-TS + Tailwind + Router + Query + axios instance (proxy `/api`→5000); placeholder Home renders. **AC:** `npm run dev` boots both; browser shows Home; `npm run build` outputs client/dist.
-- [ ] 0.4 Express serves client/dist + SPA fallback (after API & /uploads routes) with cache headers on hashed assets. **AC:** `npm run build && npm start` serves the SPA on one port; deep-link `/courses` returns index.html; `/api/v1/health` still JSON.
-- [ ] 0.5 Tooling: eslint+prettier (server+client), jest+supertest scaffold, vitest scaffold, `npm run verify` chains lint+test+build; `.env.example` v1; `DECISIONS.md` created. **AC:** `npm run verify` green.
-- [ ] 0.6 MySQL wiring: sequelize instance, config from env, `db:ping` reflected in /health (`db:true`), sequelize-cli setup (migrations/seeders paths), test DB config. **AC:** health shows db:true against local MySQL (document `docker run mysql:8` fallback for dev in README).
+- [x] 0.1 Init repo structure per 02_ARCHITECTURE §2; root `package.json` with workspaces or concurrently; `.gitignore` (.env, node_modules, storage/, client/dist). **AC:** tree matches spec; `git log` has init commit.
+- [x] 0.2 Server skeleton: Express app, helmet/cors/cookies/json, `/api/v1/health` → `{success:true,data:{status:'ok',db:false}}`, central errorHandler + 404, winston logger, zod-validated env loader with safe defaults. **AC:** `curl /api/v1/health` returns envelope.
+- [x] 0.3 Client skeleton: Vite React-TS + Tailwind + Router + Query + axios instance (proxy `/api`→5000); placeholder Home renders. **AC:** `npm run dev` boots both; browser shows Home; `npm run build` outputs client/dist.
+- [x] 0.4 Express serves client/dist + SPA fallback (after API & /uploads routes) with cache headers on hashed assets. **AC:** `npm run build && npm start` serves the SPA on one port; deep-link `/courses` returns index.html; `/api/v1/health` still JSON.
+- [x] 0.5 Tooling: eslint+prettier (server+client), jest+supertest scaffold, vitest scaffold, `npm run verify` chains lint+test+build; `.env.example` v1; `DECISIONS.md` created. **AC:** `npm run verify` green.
+- [x] 0.6 MySQL wiring: sequelize instance, config from env, `db:ping` reflected in /health (`db:true`), sequelize-cli setup (migrations/seeders paths), test DB config. **AC:** health shows db:true against local MySQL (document `docker run mysql:8` fallback for dev in README).
 
 ## Phase 1 — Database (db-engineer)
 - [ ] 1.1 Migrations+models: users, user_devices, refresh_tokens, login_events, one_time_tokens. **AC:** migrate fresh DB clean; models load.

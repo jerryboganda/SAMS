@@ -12,11 +12,23 @@ coverage/
 # Env
 .env
 .env.local
+server/.env
+server/.env.local
+client/.env
+client/.env.local
 !.env.example
 !client/.env.example
+!server/.env.example
 
-# Uploads (never commit user-uploaded content)
-storage/uploads/
+# Storage (never commit generated/uploaded content; keep folder structure via .gitkeep)
+storage/uploads/*
+storage/invoices/*
+storage/backups/*
+storage/logs/*
+!storage/uploads/.gitkeep
+!storage/invoices/.gitkeep
+!storage/backups/.gitkeep
+!storage/logs/.gitkeep
 
 # Logs
 *.log
