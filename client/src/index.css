@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --color-navy: #0E2A47;
+  --color-navy-dark: #081B30;
+  --color-navy-light: #163C63;
+  --color-navy-surface: #0B223C;
+  --color-teal: #0FA3A3;
+  --color-teal-hover: #0C8A8A;
+  --color-teal-light: #E6F6F6;
+  --color-page: #F5F7FA;
+  --color-surface: #FFFFFF;
+  --color-text-main: #1E293B;
+  --color-text-muted: #64748B;
+  --color-success: #16A34A;
+  --color-warning: #D97706;
+  --color-danger: #DC2626;
+}
+
+:root {
+  --navy: #0E2A47;
+  --navy-dark: #081B30;
+  --teal: #0FA3A3;
+  --page-bg: #F5F7FA;
+  --surface: #FFFFFF;
+  --text-main: #1E293B;
+  --text-muted: #64748B;
+  --success: #16A34A;
+  --warning: #D97706;
+  --danger: #DC2626;
+}
+
+/* Custom scrollbar and smooth UI utilities */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Print Stylesheet for Reports, Invoices & Exam Documents */
+@media print {
+  header,
+  aside,
+  nav,
+  footer,
+  .no-print,
+  .print\:hidden,
+  button:not(.print-keep),
+  [role="navigation"] {
+    display: none !important;
+  }
+
+  body,
+  html,
+  #root {
+    background: #ffffff !important;
+    color: #1e293b !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  .shadow-xs,
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg,
+  .shadow-xl,
+  .shadow-2xl {
+    box-shadow: none !important;
+  }
+
+  tr,
+  img,
+  table {
+    page-break-inside: avoid;
+  }
+}
+
