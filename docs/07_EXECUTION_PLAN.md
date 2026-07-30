@@ -13,12 +13,12 @@
 - [x] 0.6 MySQL wiring: sequelize instance, config from env, `db:ping` reflected in /health (`db:true`), sequelize-cli setup (migrations/seeders paths), test DB config. **AC:** health shows db:true against local MySQL (document `docker run mysql:8` fallback for dev in README).
 
 ## Phase 1 — Database (db-engineer)
-- [ ] 1.1 Migrations+models: users, user_devices, refresh_tokens, login_events, one_time_tokens. **AC:** migrate fresh DB clean; models load.
-- [ ] 1.2 Migrations+models: courses, course_sections, lectures, lecture_progress, lecture_bookmarks, playback_sessions. **AC:** same.
-- [ ] 1.3 Migrations+models: coupons, orders, payment_events, bank_transfer_proofs, enrollments. **AC:** same + invoice_no unique.
-- [ ] 1.4 Migrations+models: subjects, body_systems, questions, question_options, mock_exams, mock_exam_questions, test_sessions, test_attempt_questions, question_bookmarks, user_question_history, user_daily_stats. **AC:** same.
-- [ ] 1.5 Migrations+models: announcements, notifications, faculty, faqs, contact_messages, audit_logs, settings; associations file wiring all relations. **AC:** `migrate` then `migrate:undo:all` both clean.
-- [ ] 1.6 Seeders per 03 §Seed (admin, student, taxonomy, course+lectures, 200 questions, mock exam, coupon, faculty, faqs, legal pages, demo activity). **AC:** fresh `migrate && seed` succeeds; row counts logged; re-seed is idempotent or guarded.
+- [x] 1.1 Migrations+models: users, user_devices, refresh_tokens, login_events, one_time_tokens. **AC:** migrate fresh DB clean; models load.
+- [x] 1.2 Migrations+models: courses, course_sections, lectures, lecture_progress, lecture_bookmarks, playback_sessions. **AC:** same.
+- [x] 1.3 Migrations+models: coupons, orders, payment_events, bank_transfer_proofs, enrollments. **AC:** same + invoice_no unique.
+- [x] 1.4 Migrations+models: subjects, body_systems, questions, question_options, mock_exams, mock_exam_questions, test_sessions, test_attempt_questions, question_bookmarks, user_question_history, user_daily_stats. **AC:** same.
+- [x] 1.5 Migrations+models: announcements, notifications, faculty, faqs, contact_messages, audit_logs, settings; associations file wiring all relations. **AC:** `migrate` then `migrate:undo:all` both clean.
+- [x] 1.6 Seeders per 03 §Seed (admin, student, taxonomy, course+lectures, 200 questions, mock exam, coupon, faculty, faqs, legal pages, demo activity). **AC:** fresh `migrate && seed` succeeds; row counts logged; re-seed is idempotent or guarded.
 
 ## Phase 2 — Auth, devices, sessions (backend-dev → security-auditor)
 - [ ] 2.1 Register + email verification (one_time_tokens, mailer with console transport in dev, templates). **AC:** supertest: register→token→verify→active; duplicate email 409.
