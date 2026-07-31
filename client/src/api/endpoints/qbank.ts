@@ -15,14 +15,52 @@ export interface CreateTestRequest {
   forceNew?: boolean;
 }
 
+/** `GET /qbank/meta` response — see server/src/services/qbankService.js#getQbankMeta. */
+export interface QbankFilterCount {
+  examCategory: ExamCategory;
+  subjectId: number;
+  systemId: number;
+  count: number;
+}
+
+export interface QbankMetaResponse {
+  categories: ExamCategory[];
+  subjects: Subject[];
+  systems: BodySystem[];
+  countsByCategory: { examCategory: ExamCategory; count: number }[];
+  /** One row per (examCategory, subjectId, systemId) combination with at least one active question — the
+   * exact real counts the create-test wizard uses instead of fabricating numbers client-side. */
+  filterCounts: QbankFilterCount[];
+  poolsCount: { all: number; unused: number; incorrect: number; bookmarked: number };
+}
+
+/** `PATCH /qbank/tests/:id/answer` response — practice mode includes the reveal fields immediately;
+ * exam/mock mode is just `{ success: true }` (server/src/services/qbankService.js#answerQuestion). */
+export interface AnswerQuestionResponse {
+  success?: boolean;
+  isCorrect?: boolean;
+  correctOptionId?: number;
+  explanation?: string;
+  referenceText?: string;
+}
+
 export const qbankApi = {
-  async getMeta() {
+  async getMeta(): Promise<QbankMetaResponse> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 300);
+      const categories: ExamCategory[] = ["NRE1", "USMLE1", "USMLE2CK", "SMLE", "DHA", "PROMETRIC", "MBBS"];
+      const filterCounts: QbankFilterCount[] = MOCK_QUESTIONS.map((q) => ({
+        examCategory: q.examCategory,
+        subjectId: q.subjectId,
+        systemId: q.systemId,
+        count: 1,
+      }));
       return {
-        categories: ["NRE1", "USMLE1", "USMLE2CK", "SMLE", "DHA", "PROMETRIC", "MBBS"],
+        categories,
         subjects: MOCK_SUBJECTS,
         systems: MOCK_SYSTEMS,
+        countsByCategory: categories.map((c) => ({ examCategory: c, count: MOCK_QUESTIONS.length })),
+        filterCounts,
         poolsCount: {
           all: MOCK_QUESTIONS.length,
           unused: 45,
@@ -31,7 +69,7 @@ export const qbankApi = {
         },
       };
     }
-    return apiFetch<any>("/qbank/meta");
+    return apiFetch<QbankMetaResponse>("/qbank/meta");
   },
 
   async createTest(req: CreateTestRequest): Promise<TestSession> {
@@ -241,7 +279,25 @@ export const qbankApi = {
     return apiFetch<TestSession>(`/qbank/tests/${testId}`);
   },
 
-  async answerQuestion(testId: number, data: { questionId: number; optionId?: number; timeSpent: number; flagged?: boolean; skipSimulatedFailure?: boolean }) {
+  /** `GET /qbank/tests/:id/review` — 403s if the session isn't completed/abandoned yet
+   * (server/src/services/qbankService.js#getTestReview). Distinct from getTestSession because it's the
+   * semantically-correct, server-authoritative endpoint for the post-completion Review page. */
+  async getTestReview(testId: number): Promise<TestSession> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 300);
+      const session = await this.getTestSession(testId);
+      if (session.status === "in_progress") {
+        throw new ApiError("This test must be completed or abandoned before it can be reviewed.", "FORBIDDEN", 403);
+      }
+      return session;
+    }
+    return apiFetch<TestSession>(`/qbank/tests/${testId}/review`);
+  },
+
+  async answerQuestion(
+    testId: number,
+    data: { questionId: number; optionId?: number | null; timeSpent: number; flagged?: boolean; skipSimulatedFailure?: boolean }
+  ): Promise<AnswerQuestionResponse> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 200);
 
@@ -259,7 +315,7 @@ export const qbankApi = {
         const test: TestSession = JSON.parse(activeTestJson);
         const qItem = test.questions?.find((q) => q.questionId === data.questionId);
         if (qItem) {
-          qItem.selectedOptionId = data.optionId;
+          qItem.selectedOptionId = data.optionId ?? undefined;
           if (data.flagged !== undefined) qItem.isFlagged = data.flagged;
           qItem.timeSpentSeconds += data.timeSpent;
 
@@ -284,7 +340,7 @@ export const qbankApi = {
 
       return { success: true };
     }
-    return apiFetch<any>(`/qbank/tests/${testId}/answer`, {
+    return apiFetch<AnswerQuestionResponse>(`/qbank/tests/${testId}/answer`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
@@ -340,12 +396,22 @@ export const qbankApi = {
     return apiFetch<TestSession>(`/qbank/tests/${testId}/submit`, { method: "POST" });
   },
 
-  async toggleQuestionBookmark(questionId: number) {
+  /**
+   * `POST` (bookmarked=true) / `DELETE` (bookmarked=false) `/qbank/questions/:id/bookmark` — the real API is a
+   * toggle expressed as two distinct verbs (server/src/routes/v1/qbank.js), not a single idempotent toggle
+   * endpoint, so the caller must pass the INTENDED next state rather than "just flip whatever it currently is".
+   * 403 if the question was never encountered in one of the user's own tests
+   * (server/src/services/qbankService.js#assertQuestionSeenByUser) — not expected from normal UI flow since
+   * bookmark buttons only ever render on a question the student is actively viewing.
+   */
+  async setQuestionBookmark(questionId: number, bookmarked: boolean): Promise<{ isBookmarked: boolean }> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 150);
-      return { isBookmarked: true };
+      return { isBookmarked: bookmarked };
     }
-    return apiFetch<{ isBookmarked: boolean }>(`/qbank/questions/${questionId}/bookmark`, { method: "POST" });
+    return apiFetch<{ isBookmarked: boolean }>(`/qbank/questions/${questionId}/bookmark`, {
+      method: bookmarked ? "POST" : "DELETE",
+    });
   },
 
   async getAnalytics() {
@@ -451,3 +517,91 @@ export const qbankApi = {
     return apiFetch<MockExam[]>("/mock-exams");
   },
 };
+
+// ---------------------------------------------------------------------------
+// GAP WORKAROUND: there is no `GET /qbank/bookmarks` (or equivalent "my
+// bookmarked/incorrect questions with full content") listing endpoint in the
+// real backend — `POST`/`DELETE /qbank/questions/:id/bookmark` are toggle-only,
+// and `GET /qbank/meta`'s `poolsCount.bookmarked`/`poolsCount.incorrect` are
+// COUNTS only, not lists (server/src/routes/v1/qbank.js has no such route;
+// confirmed against server/src/services/qbankService.js). See DECISIONS.md's
+// dated Phase 7.5-7.6 entry for the full writeup of this gap.
+//
+// Rather than fabricating question content client-side (explicitly against
+// this phase's brief), this reconstructs a REAL list from data the backend
+// already gives us: `GET /qbank/tests` (history) + `GET /qbank/tests/:id/review`
+// per completed/abandoned session (review always returns each question's
+// CURRENT `isBookmarked` state — a fresh QuestionBookmark lookup on every call,
+// never a stale historical snapshot — and that session's own answer
+// correctness). Capped to the most recent N sessions to bound network calls;
+// this is a workaround, not a substitute for a real listing endpoint (a
+// left-over bookmark on a question from session #200 would never surface once
+// more than ENCOUNTERED_SCAN_SESSION_CAP newer sessions exist) — flagged
+// clearly in the UI copy of BookmarksPage.tsx / IncorrectQuestionsPage.tsx.
+// ---------------------------------------------------------------------------
+
+export const ENCOUNTERED_SCAN_SESSION_CAP = 20;
+
+export interface EncounteredQuestionsResult {
+  questions: Question[];
+  scannedSessionsCount: number;
+  truncated: boolean;
+}
+
+/**
+ * `kind: "bookmarked"` — every currently-bookmarked question the user has ever encountered in one of the last
+ * `ENCOUNTERED_SCAN_SESSION_CAP` completed/abandoned sessions (any occurrence counts — `isBookmarked` is always
+ * live, not historical).
+ *
+ * `kind: "incorrect"` — questions whose MOST RECENT attempt (across scanned sessions, newest-first) was wrong —
+ * approximates the server's own `UserQuestionHistory.lastResult==='incorrect'` semantics (a question missed once
+ * then later answered correctly elsewhere should NOT still show here), without a real endpoint to ask directly.
+ */
+export async function scanEncounteredQuestions(kind: "bookmarked" | "incorrect"): Promise<EncounteredQuestionsResult> {
+  const history = await qbankApi.getTestHistory();
+  const reviewable = history
+    .filter((s) => s.status === "completed" || s.status === "abandoned")
+    .slice(0, ENCOUNTERED_SCAN_SESSION_CAP); // history is already startedAt DESC — most recent first
+
+  const reviews = await Promise.all(
+    reviewable.map((s) =>
+      qbankApi.getTestReview(s.id).catch((err) => {
+        console.warn(`scanEncounteredQuestions: failed to load review for session ${s.id}`, err);
+        return null;
+      })
+    )
+  );
+
+  // Tracked independently of the "incorrect" determination below — `isBookmarked` is always live/current on
+  // every review response, so ANY occurrence is equally valid (no most-recent-wins needed).
+  const bookmarked = new Map<number, Question>();
+  // Tracked per-question across ALL scanned sessions (not just ones matching `kind`) so the FIRST occurrence
+  // encountered (history is newest-first, so this is the MOST RECENT attempt) wins — a question missed once
+  // then later answered correctly in a newer session must NOT still surface as "incorrect" here.
+  const latestResultByQuestion = new Map<number, { isCorrect: boolean; question: Question }>();
+
+  for (const review of reviews) {
+    if (!review || !review.questions) continue;
+    for (const aq of review.questions) {
+      if (aq.question.isBookmarked && !bookmarked.has(aq.questionId)) {
+        bookmarked.set(aq.questionId, aq.question);
+      }
+      if (aq.selectedOptionId != null && aq.isCorrect != null && !latestResultByQuestion.has(aq.questionId)) {
+        latestResultByQuestion.set(aq.questionId, { isCorrect: aq.isCorrect, question: aq.question });
+      }
+    }
+  }
+
+  const questions =
+    kind === "bookmarked"
+      ? Array.from(bookmarked.values())
+      : Array.from(latestResultByQuestion.values())
+          .filter((r) => !r.isCorrect)
+          .map((r) => r.question);
+
+  return {
+    questions,
+    scannedSessionsCount: reviewable.length,
+    truncated: history.filter((s) => s.status === "completed" || s.status === "abandoned").length > ENCOUNTERED_SCAN_SESSION_CAP,
+  };
+}

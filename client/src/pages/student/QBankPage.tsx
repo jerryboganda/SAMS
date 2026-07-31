@@ -4,78 +4,57 @@ import {
   Play,
   PlusCircle,
   Clock,
-  RotateCcw,
-  CheckCircle2,
   XCircle,
   HelpCircle,
   FileQuestion,
   Bookmark,
   Zap,
   BarChart2,
-  AlertTriangle,
+  AlertCircle,
   ArrowRight,
-  Sparkles,
 } from "lucide-react";
-import { Card, Button, Badge, Table, Skeleton } from "../../components/ui";
+import { Card, Button, Badge, Skeleton, EmptyState } from "../../components/ui";
 import { qbankApi } from "../../api/endpoints/qbank";
 import { TestSession } from "../../types";
+import { findActiveSession } from "../../components/qbank/testRunnerLogic";
+
+type LoadState = "loading" | "error" | "data";
 
 export const QBankPage: React.FC = () => {
   const navigate = useNavigate();
 
   // State
-  const [isLoading, setIsLoading] = useState(true);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadErrorMsg, setLoadErrorMsg] = useState("");
   const [metaCounts, setMetaCounts] = useState<{
     all: number;
     unused: number;
     incorrect: number;
     bookmarked: number;
-  }>({ all: 64, unused: 45, incorrect: 12, bookmarked: 13 });
+  }>({ all: 0, unused: 0, incorrect: 0, bookmarked: 0 });
 
   const [testHistory, setTestHistory] = useState<TestSession[]>([]);
   const [activeTest, setActiveTest] = useState<TestSession | null>(null);
   const [historyFilter, setHistoryFilter] = useState<"all" | "completed" | "in_progress" | "abandoned">("all");
+  const [abandonError, setAbandonError] = useState<string | null>(null);
 
   const loadQBankHubData = async () => {
-    setIsLoading(true);
+    setLoadState("loading");
+    setLoadErrorMsg("");
     try {
-      const [meta, history] = await Promise.all([
-        qbankApi.getMeta(),
-        qbankApi.getTestHistory(),
-      ]);
+      const [meta, history] = await Promise.all([qbankApi.getMeta(), qbankApi.getTestHistory()]);
 
-      if (meta?.poolsCount) {
-        setMetaCounts(meta.poolsCount);
-      }
-
+      setMetaCounts(meta.poolsCount);
       setTestHistory(history || []);
-
-      // Check active test in progress
-      const active = history.find((t) => t.status === "in_progress");
-      if (active) {
-        setActiveTest(active);
-      } else {
-        // Also check localStorage fallback
-        const localJson = localStorage.getItem("sams_mock_active_test");
-        if (localJson) {
-          try {
-            const localSession: TestSession = JSON.parse(localJson);
-            if (localSession && localSession.status === "in_progress") {
-              setActiveTest(localSession);
-            } else {
-              setActiveTest(null);
-            }
-          } catch {
-            setActiveTest(null);
-          }
-        } else {
-          setActiveTest(null);
-        }
-      }
-    } catch (err) {
+      // Real history already includes in_progress sessions (server/src/services/qbankService.js#listTestHistory)
+      // — no client-side (mock-era) localStorage fallback needed or wanted here; a stale leftover entry there
+      // would otherwise point the resume banner at a session that no longer exists server-side.
+      setActiveTest(findActiveSession(history || []) ?? null);
+      setLoadState("data");
+    } catch (err: any) {
       console.error("Failed to load QBank Hub data", err);
-    } finally {
-      setIsLoading(false);
+      setLoadErrorMsg(err?.message || "Failed to load the QBank hub.");
+      setLoadState("error");
     }
   };
 
@@ -87,12 +66,13 @@ export const QBankPage: React.FC = () => {
     if (!confirm("Are you sure you want to abandon this test block? Your current responses will be saved to historical statistics.")) {
       return;
     }
+    setAbandonError(null);
     try {
       await qbankApi.abandonTest(testId);
       setActiveTest(null);
       loadQBankHubData();
     } catch (err: any) {
-      alert(err.message || "Failed to abandon test block.");
+      setAbandonError(err?.message || "Failed to abandon test block.");
     }
   };
 
@@ -100,6 +80,20 @@ export const QBankPage: React.FC = () => {
     if (historyFilter === "all") return true;
     return t.status === historyFilter;
   });
+
+  if (loadState === "error") {
+    return (
+      <div className="py-12 max-w-xl mx-auto">
+        <EmptyState
+          icon={<AlertCircle className="w-10 h-10 text-rose-500" />}
+          title="Couldn't load the QBank hub"
+          description={loadErrorMsg}
+          actionLabel="Retry"
+          onAction={loadQBankHubData}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-12">
@@ -154,6 +148,13 @@ export const QBankPage: React.FC = () => {
           <span className="text-[10px] text-[#0FA3A3] font-bold">High-yield saved vignettes</span>
         </Card>
       </div>
+
+      {abandonError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-bold flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{abandonError}</span>
+        </div>
+      )}
 
       {/* Active In-Progress Test Resume Banner */}
       {activeTest && (
@@ -345,7 +346,7 @@ export const QBankPage: React.FC = () => {
         </div>
 
         {/* History Table */}
-        {isLoading ? (
+        {loadState === "loading" ? (
           <div className="space-y-3 py-4">
             <Skeleton className="h-10 w-full rounded-xl" />
             <Skeleton className="h-10 w-full rounded-xl" />

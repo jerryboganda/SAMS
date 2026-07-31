@@ -119,3 +119,12 @@ export const HEARTBEAT_DELTA_MAX_SECONDS = 60;
 // fraction of its duration (video credits/outro are typically the last few
 // percent — 95% avoids requiring a frame-perfect "watched to the very end").
 export const LECTURE_COMPLETE_THRESHOLD_RATIO = 0.95;
+
+// --- Student — QBank engine (docs/04_API_SPEC.md §4, docs/02_ARCHITECTURE.md
+// §5; docs/07_EXECUTION_PLAN.md 7.1-7.4 — see DECISIONS.md for the "reject,
+// don't silently clamp" call on the bounds below) --------------------------
+
+// POST /qbank/tests's `count` — rejected with 422 VALIDATION_ERROR outside
+// this range (zod `.min().max()`), never silently clamped.
+export const QBANK_TEST_COUNT_MIN = 5;
+export const QBANK_TEST_COUNT_MAX = 200;

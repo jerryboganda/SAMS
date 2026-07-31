@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   Award,
@@ -13,38 +13,42 @@ import {
   Sparkles,
   HelpCircle,
   FileText,
+  AlertCircle,
 } from "lucide-react";
-import { Card, Button, Badge, ProgressBar } from "../../components/ui";
+import { Card, Button, Badge, ProgressBar, Skeleton, EmptyState } from "../../components/ui";
 import { qbankApi } from "../../api/endpoints/qbank";
 import { TestSession } from "../../types";
 
+type LoadState = "loading" | "error" | "data";
+
 export const TestResultPage: React.FC = () => {
   const params = useParams<{ testId?: string; id?: string }>();
-  const testIdParam = params.testId || params.id || "101";
+  const testIdParam = params.testId || params.id || "";
   const navigate = useNavigate();
 
   const [session, setSession] = useState<TestSession | null>(null);
   const [historyList, setHistoryList] = useState<TestSession[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadErrorMsg, setLoadErrorMsg] = useState("");
+
+  const loadResult = useCallback(async () => {
+    setLoadState("loading");
+    setLoadErrorMsg("");
+    try {
+      const [data, hist] = await Promise.all([qbankApi.getTestSession(Number(testIdParam)), qbankApi.getTestHistory()]);
+      setSession(data);
+      setHistoryList(hist);
+      setLoadState("data");
+    } catch (err: any) {
+      console.error("Failed to load test session result", err);
+      setLoadErrorMsg(err?.message || "Failed to load your test result.");
+      setLoadState("error");
+    }
+  }, [testIdParam]);
 
   useEffect(() => {
-    async function loadResult() {
-      setIsLoading(true);
-      try {
-        const [data, hist] = await Promise.all([
-          qbankApi.getTestSession(Number(testIdParam) || 101),
-          qbankApi.getTestHistory(),
-        ]);
-        setSession(data);
-        setHistoryList(hist);
-      } catch (err) {
-        console.error("Failed to load test session result", err);
-      } finally {
-        setIsLoading(false);
-      }
-    }
     loadResult();
-  }, [testIdParam]);
+  }, [loadResult]);
 
   // Subject and System Breakdown calculations
   const { subjectBreakdown, systemBreakdown, totalTimeSpentSeconds } = useMemo(() => {
@@ -85,17 +89,43 @@ export const TestResultPage: React.FC = () => {
     return { subjectBreakdown: subjects, systemBreakdown: systems, totalTimeSpentSeconds: totalSec };
   }, [session]);
 
-  if (isLoading || !session) {
+  if (loadState === "loading") {
     return (
-      <div className="py-20 text-center space-y-3 max-w-xl mx-auto">
-        <div className="w-10 h-10 border-4 border-[#0FA3A3] border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-xs font-bold text-slate-500">Calculating Medical Test Analytics & Scores...</p>
+      <div className="space-y-8 pb-12 max-w-4xl mx-auto">
+        <Skeleton variant="text" className="h-8 w-72" />
+        <Skeleton variant="card" className="h-64 rounded-3xl" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Skeleton variant="card" className="h-48 rounded-2xl" />
+          <Skeleton variant="card" className="h-48 rounded-2xl" />
+        </div>
       </div>
     );
   }
 
-  const score = session.scorePercent ?? Math.round(((session.correctCount || 0) / Math.max(1, session.questionCount)) * 100);
-  const isPassed = session.passed !== undefined ? session.passed : score >= 60;
+  if (loadState === "error" || !session) {
+    return (
+      <div className="py-12 max-w-xl mx-auto">
+        <EmptyState
+          icon={<AlertCircle className="w-10 h-10 text-rose-500" />}
+          title="Couldn't load this test result"
+          description={loadErrorMsg || "Something went wrong loading your test result."}
+          actionLabel="Retry"
+          onAction={loadResult}
+        />
+      </div>
+    );
+  }
+
+  // Numbers below are read directly off the server's response (session.scorePercent/correctCount/etc) — never
+  // recomputed client-side (docs/07_EXECUTION_PLAN.md 7.6's explicit "numbers match server response exactly" AC).
+  const score = session.scorePercent ?? 0;
+  // `session.passed` is only ever a real boolean for mode==='mock' WITH a linked mock exam
+  // (server/src/services/qbankService.js#finalizeCompleted) — null/undefined for practice/exam (no pass/fail
+  // concept applies) and even for a generic mock-mode block created by this wizard (no mockExamId is ever set
+  // outside the dedicated Phase-8 mock-exam flow). Only assert PASS/FAIL styling when the server actually said
+  // so; otherwise show a neutral score summary rather than fabricating a threshold-based verdict.
+  const hasOfficialPassFail = session.passed !== undefined && session.passed !== null;
+  const isPassed = hasOfficialPassFail ? !!session.passed : score >= 60;
 
   // Format Total Duration Time
   const timeSec = totalTimeSpentSeconds || session.questionCount * 38;
@@ -120,12 +150,13 @@ export const TestResultPage: React.FC = () => {
         </div>
 
         <Badge variant={isPassed ? "teal" : "danger"} size="lg" className="font-extrabold uppercase">
-          {isPassed ? "PASSING SCORE ATTAINED" : "NEEDS IMPROVEMENT"}
+          {hasOfficialPassFail ? (isPassed ? "PASSING SCORE ATTAINED" : "NEEDS IMPROVEMENT") : `SCORE: ${score}%`}
         </Badge>
       </div>
 
-      {/* High-Impact PASS / FAIL Banner for Mock Exams */}
-      {session.mode === "mock" && (
+      {/* High-Impact PASS / FAIL Banner — only rendered when the server actually computed a real pass/fail
+          verdict (a mock-mode session with a linked mock exam); never fabricated from a threshold heuristic. */}
+      {session.mode === "mock" && hasOfficialPassFail && (
         <div
           className={`p-5 rounded-2xl border flex items-center justify-between gap-4 shadow-sm ${
             isPassed
@@ -235,9 +266,9 @@ export const TestResultPage: React.FC = () => {
 
         {/* Pass Mark Threshold Callout */}
         <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-700 text-xs text-slate-300 flex items-center justify-between">
-          <span className="font-medium">NRE Step 1 Passing Standard Threshold: <strong>60%</strong></span>
-          <Badge variant={isPassed ? "emerald" : "danger"} size="sm">
-            {isPassed ? "+15% Above Standard" : "Below Threshold"}
+          <span className="font-medium">Reference Passing Standard Threshold: <strong>60%</strong></span>
+          <Badge variant={score >= 60 ? "emerald" : "danger"} size="sm">
+            {score >= 60 ? `+${(score - 60).toFixed(0)}% Above Standard` : `${(60 - score).toFixed(0)}% Below Threshold`}
           </Badge>
         </div>
       </Card>
@@ -348,7 +379,10 @@ export const TestResultPage: React.FC = () => {
               {historyList.map((h) => {
                 const isCurrent = h.id === session.id;
                 const hScore = h.scorePercent ?? 0;
-                const hPassed = h.passed !== undefined ? h.passed : hScore >= 60;
+                // Same rule as the hero banner above — only assert PASS/FAIL when the server actually computed
+                // a real verdict (mock mode with a linked mock exam); otherwise show a neutral score badge.
+                const hHasOfficialPassFail = h.passed !== undefined && h.passed !== null;
+                const hPassed = hHasOfficialPassFail ? !!h.passed : hScore >= 60;
 
                 return (
                   <tr
@@ -373,8 +407,8 @@ export const TestResultPage: React.FC = () => {
                       {hScore}% ({h.correctCount}/{h.questionCount})
                     </td>
                     <td className="p-3">
-                      <Badge variant={hPassed ? "emerald" : "danger"} size="sm">
-                        {hPassed ? "PASS" : "FAIL"}
+                      <Badge variant={hHasOfficialPassFail ? (hPassed ? "emerald" : "danger") : "neutral"} size="sm">
+                        {hHasOfficialPassFail ? (hPassed ? "PASS" : "FAIL") : `${hScore}%`}
                       </Badge>
                     </td>
                     <td className="p-3 text-right">

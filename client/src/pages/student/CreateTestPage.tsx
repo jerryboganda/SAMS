@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -8,166 +8,196 @@ import {
   CheckCircle2,
   Sliders,
   AlertTriangle,
+  AlertCircle,
   Play,
-  RotateCcw,
   Sparkles,
-  Bookmark,
-  FileQuestion,
-  HelpCircle,
   XCircle,
+  BookOpen,
 } from "lucide-react";
-import { Card, Button, Badge, Modal, ToastSystem } from "../../components/ui";
-import { qbankApi, CreateTestRequest } from "../../api/endpoints/qbank";
-import { MOCK_QUESTIONS, MOCK_SUBJECTS, MOCK_SYSTEMS } from "../../mock-data";
+import { Card, Button, Badge, Modal, Skeleton, EmptyState } from "../../components/ui";
+import { qbankApi, CreateTestRequest, QbankMetaResponse } from "../../api/endpoints/qbank";
+import { ApiError } from "../../api/client";
 import { ExamCategory, TestMode, TestPool } from "../../types";
+
+type LoadState = "loading" | "error" | "data";
+
+const CATEGORY_LABELS: Record<string, string> = {
+  NRE1: "NRE Step 1",
+  USMLE1: "USMLE Step 1",
+  USMLE2CK: "USMLE Step 2 CK",
+  SMLE: "SMLE",
+  DHA: "DHA",
+  PROMETRIC: "Prometric",
+  MBBS: "MBBS",
+  OTHER: "Other",
+};
 
 export const CreateTestPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // Initial URL parameters (e.g., /app/qbank/new?pool=incorrect&category=NRE1&mode=practice)
   const initialPool = (searchParams.get("pool") as TestPool) || "all";
-  const initialCategory = (searchParams.get("category") as ExamCategory) || "NRE1";
   const initialMode = (searchParams.get("mode") as TestMode) || "practice";
+  const urlCategory = searchParams.get("category") as ExamCategory | null;
+
+  // --- Meta (real accessible categories / taxonomy / live counts) ---------
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadErrorMsg, setLoadErrorMsg] = useState("");
+  const [meta, setMeta] = useState<QbankMetaResponse | null>(null);
+
+  const loadMeta = useCallback(async () => {
+    setLoadState("loading");
+    setLoadErrorMsg("");
+    try {
+      const data = await qbankApi.getMeta();
+      setMeta(data);
+      setLoadState("data");
+    } catch (err: any) {
+      console.error("Failed to load QBank meta for create-test wizard", err);
+      setLoadErrorMsg(err?.message || "Failed to load question bank filters.");
+      setLoadState("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMeta();
+  }, [loadMeta]);
 
   // Wizard Step State (1: Mode & Time, 2: Pool & Taxonomy, 3: Count & Summary)
   const [currentStep, setCurrentStep] = useState<number>(1);
 
   // Form State
-  const [examCategory, setExamCategory] = useState<ExamCategory>(initialCategory);
+  const [examCategory, setExamCategory] = useState<ExamCategory>(urlCategory || "NRE1");
   const [mode, setMode] = useState<TestMode>(initialMode);
   const [pool, setPool] = useState<TestPool>(initialPool);
 
-  // Subjects & Systems selection (default all selected)
-  const [selectedSubjectIds, setSelectedSubjectIds] = useState<number[]>(() =>
-    MOCK_SUBJECTS.map((s) => s.id)
-  );
-  const [selectedSystemIds, setSelectedSystemIds] = useState<number[]>(() =>
-    MOCK_SYSTEMS.map((s) => s.id)
-  );
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState<number[]>([]);
+  const [selectedSystemIds, setSelectedSystemIds] = useState<number[]>([]);
 
-  // Timing
   const [timed, setTimed] = useState<boolean>(true);
   const [customMinutes, setCustomMinutes] = useState<number>(48);
-
-  // Question Count
   const [questionCount, setQuestionCount] = useState<number>(40);
 
-  // Loading & Conflict Modal State
   const [isCreating, setIsCreating] = useState(false);
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
   const [conflictTestId, setConflictTestId] = useState<number | null>(null);
+  const [insufficientInfo, setInsufficientInfo] = useState<{ available: number; requested: number } | null>(null);
+  const [submitErrorMsg, setSubmitErrorMsg] = useState<string | null>(null);
 
-  // Filter matching questions based on pool + subjects + systems
-  const matchingQuestions = useMemo(() => {
-    return MOCK_QUESTIONS.filter((q) => {
-      // Pool filter
-      if (pool === "bookmarked" && !q.isBookmarked) return false;
-      if (pool === "unused" && q.id <= 15) return false;
-      if (pool === "incorrect" && (q.id > 15 || q.id % 2 === 0)) return false;
+  // Once meta loads: default the exam category to the URL param (if accessible) or the
+  // student's first accessible category, and default subject/system filters to "all selected".
+  // `filtersInitialized` gates the question-count clamp effect below — without it, that effect would see a
+  // transient `maxAvailableCount===1` placeholder (computed from the still-empty `selectedSubjectIds`/
+  // `selectedSystemIds` arrays on the very first render, before this effect has had a chance to populate them)
+  // and permanently clamp the question count down to 1 before real data ever arrives.
+  const [filtersInitialized, setFiltersInitialized] = useState(false);
 
-      // Subject filter
-      if (selectedSubjectIds.length > 0 && !selectedSubjectIds.includes(q.subjectId)) {
-        return false;
-      }
-
-      // System filter
-      if (selectedSystemIds.length > 0 && !selectedSystemIds.includes(q.systemId)) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [pool, selectedSubjectIds, selectedSystemIds]);
-
-  const maxAvailableCount = Math.max(1, matchingQuestions.length);
-
-  // Auto-clamp question count whenever maxAvailableCount changes
   useEffect(() => {
-    if (questionCount > maxAvailableCount) {
-      setQuestionCount(Math.max(5, Math.min(maxAvailableCount, questionCount)));
+    if (!meta) return;
+    if (urlCategory && meta.categories.includes(urlCategory)) {
+      setExamCategory(urlCategory);
+    } else if (meta.categories.length > 0 && !meta.categories.includes(examCategory)) {
+      setExamCategory(meta.categories[0]);
     }
-  }, [maxAvailableCount]);
+    setSelectedSubjectIds(meta.subjects.map((s) => s.id));
+    setSelectedSystemIds(meta.systems.map((s) => s.id));
+    setFiltersInitialized(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta]);
 
-  // Update auto-suggested minutes when question count or timing changes
+  // --- Real, live-calculated counts from GET /qbank/meta's filterCounts ---
+  // (never fabricated — see docs/07_EXECUTION_PLAN.md 7.5's explicit AC).
+
+  const subjectSystemMatchCount = useMemo(() => {
+    if (!meta) return 0;
+    const subjectSet = new Set(selectedSubjectIds);
+    const systemSet = new Set(selectedSystemIds);
+    return meta.filterCounts
+      .filter((f) => f.examCategory === examCategory && subjectSet.has(f.subjectId) && systemSet.has(f.systemId))
+      .reduce((sum, f) => sum + f.count, 0);
+  }, [meta, examCategory, selectedSubjectIds, selectedSystemIds]);
+
+  // Pool counts (unused/incorrect/bookmarked) are only tracked totals cross-taxonomy on the server (no
+  // per-subject/system breakdown endpoint) — so once a non-"all" pool AND a narrower subject/system filter are
+  // both active, the true intersection can't be computed client-side. We take the tighter of the two known
+  // bounds (never overstating) and label the number as an estimate whenever it isn't an exact figure; the
+  // create call itself is always the authoritative check (422 INSUFFICIENT_QUESTIONS otherwise).
+  const isExactCount = pool === "all";
+  const estimatedAvailable = useMemo(() => {
+    if (!meta) return 0;
+    if (pool === "all") return subjectSystemMatchCount;
+    return Math.min(subjectSystemMatchCount, meta.poolsCount[pool] ?? 0);
+  }, [meta, pool, subjectSystemMatchCount]);
+
+  const maxAvailableCount = Math.max(1, estimatedAvailable);
+
   useEffect(() => {
-    setCustomMinutes(Math.round(questionCount * 1.2));
+    if (!filtersInitialized) return; // don't clamp against the pre-meta placeholder max
+    if (questionCount > maxAvailableCount) {
+      setQuestionCount(Math.max(Math.min(5, maxAvailableCount), Math.min(maxAvailableCount, questionCount)));
+    }
+  }, [filtersInitialized, maxAvailableCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setCustomMinutes(Math.max(5, Math.round(questionCount * 1.2)));
   }, [questionCount]);
 
-  // Subject question count map for live chip counts
+  // Per-subject / per-system live chip counts, scoped to the selected exam category + the OTHER axis's
+  // current selection (pool="all" basis — the exact figure GET /qbank/meta can give us per taxonomy row).
   const subjectQuestionCounts = useMemo(() => {
     const counts: Record<number, number> = {};
-    MOCK_SUBJECTS.forEach((s) => {
-      counts[s.id] = MOCK_QUESTIONS.filter((q) => {
-        if (q.subjectId !== s.id) return false;
-        if (pool === "bookmarked" && !q.isBookmarked) return false;
-        if (pool === "unused" && q.id <= 15) return false;
-        if (pool === "incorrect" && (q.id > 15 || q.id % 2 === 0)) return false;
-        if (selectedSystemIds.length > 0 && !selectedSystemIds.includes(q.systemId)) return false;
-        return true;
-      }).length;
+    if (!meta) return counts;
+    const systemSet = new Set(selectedSystemIds);
+    meta.subjects.forEach((s) => (counts[s.id] = 0));
+    meta.filterCounts.forEach((f) => {
+      if (f.examCategory !== examCategory || !systemSet.has(f.systemId)) return;
+      counts[f.subjectId] = (counts[f.subjectId] || 0) + f.count;
     });
     return counts;
-  }, [pool, selectedSystemIds]);
+  }, [meta, examCategory, selectedSystemIds]);
 
-  // System question count map for live chip counts
   const systemQuestionCounts = useMemo(() => {
     const counts: Record<number, number> = {};
-    MOCK_SYSTEMS.forEach((sys) => {
-      counts[sys.id] = MOCK_QUESTIONS.filter((q) => {
-        if (q.systemId !== sys.id) return false;
-        if (pool === "bookmarked" && !q.isBookmarked) return false;
-        if (pool === "unused" && q.id <= 15) return false;
-        if (pool === "incorrect" && (q.id > 15 || q.id % 2 === 0)) return false;
-        if (selectedSubjectIds.length > 0 && !selectedSubjectIds.includes(q.subjectId)) return false;
-        return true;
-      }).length;
+    if (!meta) return counts;
+    const subjectSet = new Set(selectedSubjectIds);
+    meta.systems.forEach((s) => (counts[s.id] = 0));
+    meta.filterCounts.forEach((f) => {
+      if (f.examCategory !== examCategory || !subjectSet.has(f.subjectId)) return;
+      counts[f.systemId] = (counts[f.systemId] || 0) + f.count;
     });
     return counts;
-  }, [pool, selectedSubjectIds]);
+  }, [meta, examCategory, selectedSubjectIds]);
 
-  // Select/Deselect All Handlers
   const toggleAllSubjects = () => {
-    if (selectedSubjectIds.length === MOCK_SUBJECTS.length) {
-      setSelectedSubjectIds([]);
-    } else {
-      setSelectedSubjectIds(MOCK_SUBJECTS.map((s) => s.id));
-    }
+    if (!meta) return;
+    setSelectedSubjectIds((prev) => (prev.length === meta.subjects.length ? [] : meta.subjects.map((s) => s.id)));
   };
-
   const toggleAllSystems = () => {
-    if (selectedSystemIds.length === MOCK_SYSTEMS.length) {
-      setSelectedSystemIds([]);
-    } else {
-      setSelectedSystemIds(MOCK_SYSTEMS.map((sys) => sys.id));
-    }
+    if (!meta) return;
+    setSelectedSystemIds((prev) => (prev.length === meta.systems.length ? [] : meta.systems.map((s) => s.id)));
   };
-
   const toggleSubject = (id: number) => {
-    setSelectedSubjectIds((prev) =>
-      prev.includes(id) ? prev.filter((sId) => sId !== id) : [...prev, id]
-    );
+    setSelectedSubjectIds((prev) => (prev.includes(id) ? prev.filter((sId) => sId !== id) : [...prev, id]));
   };
-
   const toggleSystem = (id: number) => {
-    setSelectedSystemIds((prev) =>
-      prev.includes(id) ? prev.filter((sysId) => sysId !== id) : [...prev, id]
-    );
+    setSelectedSystemIds((prev) => (prev.includes(id) ? prev.filter((sysId) => sysId !== id) : [...prev, id]));
   };
 
-  // Submit Handler
   const handleStartTest = async (forceNew = false) => {
+    if (!meta) return;
     setIsCreating(true);
+    setInsufficientInfo(null);
+    setSubmitErrorMsg(null);
     try {
       const payload: CreateTestRequest = {
         examCategory,
         mode,
         pool,
-        count: Math.min(questionCount, maxAvailableCount),
+        count: Math.min(Math.max(5, questionCount), 200, maxAvailableCount),
         timed,
         timeLimitSeconds: timed ? customMinutes * 60 : undefined,
-        subjectIds: selectedSubjectIds.length < MOCK_SUBJECTS.length ? selectedSubjectIds : undefined,
-        systemIds: selectedSystemIds.length < MOCK_SYSTEMS.length ? selectedSystemIds : undefined,
+        subjectIds: selectedSubjectIds.length < meta.subjects.length ? selectedSubjectIds : undefined,
+        systemIds: selectedSystemIds.length < meta.systems.length ? selectedSystemIds : undefined,
         forceNew,
       };
 
@@ -175,16 +205,63 @@ export const CreateTestPage: React.FC = () => {
       setConflictModalOpen(false);
       navigate(`/app/qbank/session/${session.id}`);
     } catch (err: any) {
-      if (err.code === "ACTIVE_TEST_EXISTS" || err.status === 409) {
-        setConflictTestId(err.details?.testId || 101);
+      const apiErr = err as ApiError;
+      if (apiErr.code === "ACTIVE_TEST_EXISTS" || apiErr.status === 409) {
+        setConflictTestId(apiErr.details?.testId ?? null);
         setConflictModalOpen(true);
+      } else if (apiErr.code === "INSUFFICIENT_QUESTIONS") {
+        setInsufficientInfo({
+          available: apiErr.details?.available ?? 0,
+          requested: apiErr.details?.requested ?? questionCount,
+        });
+        setCurrentStep(3);
       } else {
-        alert(err.message || "Failed to create test block.");
+        setSubmitErrorMsg(apiErr.message || "Failed to create test block. Please try again.");
       }
     } finally {
       setIsCreating(false);
     }
   };
+
+  // --- Loading / error / empty states --------------------------------------
+
+  if (loadState === "loading") {
+    return (
+      <div className="space-y-6 pb-12 max-w-4xl mx-auto">
+        <Skeleton variant="text" className="h-8 w-64" />
+        <Skeleton variant="card" className="h-14 rounded-2xl" />
+        <Skeleton variant="card" className="h-96 rounded-2xl" />
+      </div>
+    );
+  }
+
+  if (loadState === "error" || !meta) {
+    return (
+      <div className="py-12 max-w-xl mx-auto">
+        <EmptyState
+          icon={<AlertCircle className="w-10 h-10 text-rose-500" />}
+          title="Couldn't load the test-block wizard"
+          description={loadErrorMsg || "Something went wrong loading question bank filters."}
+          actionLabel="Retry"
+          onAction={loadMeta}
+        />
+      </div>
+    );
+  }
+
+  if (meta.categories.length === 0) {
+    return (
+      <div className="py-12 max-w-xl mx-auto">
+        <EmptyState
+          icon={<BookOpen className="w-10 h-10 text-slate-400" />}
+          title="No QBank-enabled enrollment found"
+          description="You aren't currently enrolled in a course that includes QBank access. Browse courses to get started."
+          actionLabel="Browse Courses"
+          onAction={() => navigate("/courses")}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12 max-w-4xl mx-auto">
@@ -204,9 +281,16 @@ export const CreateTestPage: React.FC = () => {
         </div>
 
         <Badge variant="teal" size="md">
-          Exam Target: PMDC NRE Step 1
+          Exam Target: {CATEGORY_LABELS[examCategory] || examCategory}
         </Badge>
       </div>
+
+      {submitErrorMsg && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-bold flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{submitErrorMsg}</span>
+        </div>
+      )}
 
       {/* 3-Step Wizard Progress Bar */}
       <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center select-none">
@@ -256,12 +340,32 @@ export const CreateTestPage: React.FC = () => {
           <div className="space-y-6 animate-fade-in">
             <div>
               <h2 className="text-lg font-black text-[#0E2A47] flex items-center gap-2">
-                <Zap className="w-5 h-5 text-[#0FA3A3]" /> Step 1: Select Test Mode
+                <Zap className="w-5 h-5 text-[#0FA3A3]" /> Step 1: Select Exam Target & Mode
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                Choose how answer feedback and time constraints are handled during the test block.
+                Choose your accessible exam category and how answer feedback / time constraints are handled.
               </p>
             </div>
+
+            {meta.categories.length > 1 && (
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-[#0E2A47]" htmlFor="exam-category-select">
+                  Exam Category
+                </label>
+                <select
+                  id="exam-category-select"
+                  value={examCategory}
+                  onChange={(e) => setExamCategory(e.target.value as ExamCategory)}
+                  className="w-full sm:w-64 px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-[#0E2A47] focus:ring-2 focus:ring-[#0FA3A3] focus:border-[#0FA3A3]"
+                >
+                  {meta.categories.map((c) => (
+                    <option key={c} value={c}>
+                      {CATEGORY_LABELS[c] || c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Mode Option Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -332,8 +436,11 @@ export const CreateTestPage: React.FC = () => {
 
                 {timed && (
                   <div className="pl-7 pt-2 flex flex-wrap items-center gap-3 border-t border-slate-200/60">
-                    <span className="text-xs font-bold text-slate-700">Allocated Time:</span>
+                    <label htmlFor="allocated-minutes" className="text-xs font-bold text-slate-700">
+                      Allocated Time:
+                    </label>
                     <input
+                      id="allocated-minutes"
                       type="number"
                       min={5}
                       max={300}
@@ -342,7 +449,7 @@ export const CreateTestPage: React.FC = () => {
                       className="w-20 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-[#0E2A47] focus:ring-2 focus:ring-[#0FA3A3]"
                     />
                     <span className="text-xs font-semibold text-slate-500">
-                      Minutes ({Math.round((customMinutes * 60) / questionCount)} sec / Q)
+                      Minutes ({Math.round((customMinutes * 60) / Math.max(1, questionCount))} sec / Q)
                     </span>
                   </div>
                 )}
@@ -374,16 +481,18 @@ export const CreateTestPage: React.FC = () => {
             <div className="space-y-2">
               <label className="text-xs font-bold text-[#0E2A47]">Question Pool Source</label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { id: "all", label: "All Questions", count: 64 },
-                  { id: "unused", label: "Unused Questions", count: 45 },
-                  { id: "incorrect", label: "Incorrect Pool", count: 12 },
-                  { id: "bookmarked", label: "Bookmarked", count: 13 },
-                ].map((p) => (
+                {(
+                  [
+                    { id: "all", label: "All Questions", count: meta.poolsCount.all },
+                    { id: "unused", label: "Unused Questions", count: meta.poolsCount.unused },
+                    { id: "incorrect", label: "Incorrect Pool", count: meta.poolsCount.incorrect },
+                    { id: "bookmarked", label: "Bookmarked", count: meta.poolsCount.bookmarked },
+                  ] as { id: TestPool; label: string; count: number }[]
+                ).map((p) => (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => setPool(p.id as TestPool)}
+                    onClick={() => setPool(p.id)}
                     className={`p-3 rounded-xl border text-xs text-left transition-all ${
                       pool === p.id
                         ? "border-[#0FA3A3] bg-[#0FA3A3]/10 font-extrabold text-[#0E2A47] shadow-xs"
@@ -402,11 +511,12 @@ export const CreateTestPage: React.FC = () => {
               <div className="flex items-center gap-2 text-xs font-bold">
                 <Sparkles className="w-4 h-4 text-[#0FA3A3]" />
                 <span>
-                  Live Filter Matches: <span className="text-[#0FA3A3] text-sm font-black">{matchingQuestions.length}</span> questions available
+                  {isExactCount ? "Live Filter Matches" : "Estimated Available"}:{" "}
+                  <span className="text-[#0FA3A3] text-sm font-black">{estimatedAvailable}</span> questions
                 </span>
               </div>
               <Badge variant="teal" size="sm">
-                Live Calculated
+                {isExactCount ? "Server-Verified" : "Confirmed at Creation"}
               </Badge>
             </div>
 
@@ -414,19 +524,19 @@ export const CreateTestPage: React.FC = () => {
             <div className="space-y-3">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                 <span className="text-xs font-extrabold text-[#0E2A47]">
-                  Medical Basic & Clinical Sciences ({selectedSubjectIds.length}/{MOCK_SUBJECTS.length})
+                  Medical Basic & Clinical Sciences ({selectedSubjectIds.length}/{meta.subjects.length})
                 </span>
                 <button
                   type="button"
                   onClick={toggleAllSubjects}
                   className="text-[11px] font-bold text-[#0FA3A3] hover:underline"
                 >
-                  {selectedSubjectIds.length === MOCK_SUBJECTS.length ? "Deselect All" : "Select All"}
+                  {selectedSubjectIds.length === meta.subjects.length ? "Deselect All" : "Select All"}
                 </button>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                {MOCK_SUBJECTS.map((s) => {
+                {meta.subjects.map((s) => {
                   const isChecked = selectedSubjectIds.includes(s.id);
                   const count = subjectQuestionCounts[s.id] || 0;
 
@@ -455,19 +565,19 @@ export const CreateTestPage: React.FC = () => {
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                 <span className="text-xs font-extrabold text-[#0E2A47]">
-                  Organ Systems ({selectedSystemIds.length}/{MOCK_SYSTEMS.length})
+                  Organ Systems ({selectedSystemIds.length}/{meta.systems.length})
                 </span>
                 <button
                   type="button"
                   onClick={toggleAllSystems}
                   className="text-[11px] font-bold text-[#0FA3A3] hover:underline"
                 >
-                  {selectedSystemIds.length === MOCK_SYSTEMS.length ? "Deselect All" : "Select All"}
+                  {selectedSystemIds.length === meta.systems.length ? "Deselect All" : "Select All"}
                 </button>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                {MOCK_SYSTEMS.map((sys) => {
+                {meta.systems.map((sys) => {
                   const isChecked = selectedSystemIds.includes(sys.id);
                   const count = systemQuestionCounts[sys.id] || 0;
 
@@ -500,7 +610,7 @@ export const CreateTestPage: React.FC = () => {
               <Button
                 variant="teal"
                 size="md"
-                disabled={matchingQuestions.length === 0}
+                disabled={estimatedAvailable === 0}
                 onClick={() => setCurrentStep(3)}
               >
                 Next: Set Count & Review &rarr;
@@ -521,6 +631,33 @@ export const CreateTestPage: React.FC = () => {
               </p>
             </div>
 
+            {insufficientInfo && (
+              <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs space-y-2">
+                <div className="flex items-center gap-2 font-black">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>
+                    Only {insufficientInfo.available} question{insufficientInfo.available === 1 ? "" : "s"} actually
+                    match your filters (you requested {insufficientInfo.requested}).
+                  </span>
+                </div>
+                <p className="font-medium">
+                  Widen your subject/system filters, choose a different pool, or use the corrected count below.
+                </p>
+                {insufficientInfo.available >= 5 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setQuestionCount(insufficientInfo.available);
+                      setInsufficientInfo(null);
+                    }}
+                  >
+                    Use {insufficientInfo.available} Questions Instead
+                  </Button>
+                )}
+              </div>
+            )}
+
             {/* Slider Controls Container */}
             <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
               <div className="flex items-center justify-between">
@@ -530,9 +667,10 @@ export const CreateTestPage: React.FC = () => {
                 </span>
               </div>
 
-              {/* Range Input Slider (Clamped) */}
+              {/* Range Input Slider (Clamped to [5,200] and the live/estimated max) */}
               <input
                 type="range"
+                aria-label="Question block size"
                 min={Math.min(5, maxAvailableCount)}
                 max={Math.min(200, maxAvailableCount)}
                 value={questionCount}
@@ -543,12 +681,12 @@ export const CreateTestPage: React.FC = () => {
               {/* Slider Presets */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <span className="text-[11px] text-slate-400 font-semibold">
-                  Max Available: {maxAvailableCount} Q
+                  Max Available: {maxAvailableCount} Q {!isExactCount && "(est.)"}
                 </span>
 
                 <div className="flex items-center gap-1.5">
                   {[10, 20, 40, maxAvailableCount].map((preset) => {
-                    if (preset > maxAvailableCount) return null;
+                    if (preset > maxAvailableCount || preset < 5) return null;
                     return (
                       <button
                         key={preset}
@@ -577,7 +715,7 @@ export const CreateTestPage: React.FC = () => {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                 <div>
                   <span className="text-slate-600 font-semibold block">Target Exam</span>
-                  <span className="font-extrabold text-[#0E2A47]">NRE Step 1</span>
+                  <span className="font-extrabold text-[#0E2A47]">{CATEGORY_LABELS[examCategory] || examCategory}</span>
                 </div>
 
                 <div>
@@ -593,14 +731,14 @@ export const CreateTestPage: React.FC = () => {
                 <div>
                   <span className="text-slate-600 font-semibold block">Subjects Filter</span>
                   <span className="font-extrabold text-[#0E2A47]">
-                    {selectedSubjectIds.length}/{MOCK_SUBJECTS.length} Subjects
+                    {selectedSubjectIds.length}/{meta.subjects.length} Subjects
                   </span>
                 </div>
 
                 <div>
                   <span className="text-slate-600 font-semibold block">Systems Filter</span>
                   <span className="font-extrabold text-[#0E2A47]">
-                    {selectedSystemIds.length}/{MOCK_SYSTEMS.length} Systems
+                    {selectedSystemIds.length}/{meta.systems.length} Systems
                   </span>
                 </div>
 
@@ -623,6 +761,7 @@ export const CreateTestPage: React.FC = () => {
                 variant="teal"
                 size="lg"
                 isLoading={isCreating}
+                disabled={estimatedAvailable === 0}
                 icon={<Play className="w-5 h-5 fill-current" />}
                 onClick={() => handleStartTest(false)}
               >
@@ -650,7 +789,8 @@ export const CreateTestPage: React.FC = () => {
               Unfinished Test Session Detected
             </h3>
             <p className="text-xs text-slate-600 leading-relaxed max-w-sm mx-auto">
-              You already have an active test block (Session #{conflictTestId || 101}) in progress. In compliance with medical candidate testing policies, only one active test block can exist at a time.
+              You already have an active test block{conflictTestId ? ` (Session #${conflictTestId})` : ""} in
+              progress. Only one active test block can exist at a time.
             </p>
           </div>
 
@@ -663,7 +803,8 @@ export const CreateTestPage: React.FC = () => {
               variant="teal"
               size="md"
               fullWidth
-              onClick={() => navigate(`/app/qbank/session/${conflictTestId || 101}`)}
+              disabled={!conflictTestId}
+              onClick={() => conflictTestId && navigate(`/app/qbank/session/${conflictTestId}`)}
               icon={<Play className="w-4 h-4 fill-current" />}
             >
               Resume Active Test

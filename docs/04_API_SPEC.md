@@ -58,6 +58,8 @@ Conventions: JSON only. Envelope `{success:true,data}` / `{success:false,error:{
 | GET `/qbank/tests/:id/review` | S | full review payload (chosen vs correct, explanation, references, time/Q) — only after completion |
 | GET `/qbank/tests` | S | history list (mode, date, score, filters) |
 | POST/DELETE `/qbank/questions/:id/bookmark` | S | toggle (only questions seen by user) |
+| GET `/qbank/questions/bookmarked` | S | flat list of my bookmarked questions, full content (options/explanation/reference always included — bookmarking implies already-seen) |
+| GET `/qbank/questions/incorrect` | S | flat list of my past-wrong questions (`user_question_history.last_result='incorrect'`, same definition `pool:'incorrect'` uses), full content |
 | GET `/qbank/analytics` | S | totals & %s, avg time/Q, subject-wise + system-wise arrays, strengths/weaknesses, series `?range=daily|weekly|monthly` from user_daily_stats |
 | GET `/mock-exams` | S | published, my categories, my best/last attempts |
 | POST `/mock-exams/:id/start` | S | creates mock test_session from fixed paper |

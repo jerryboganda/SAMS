@@ -57,12 +57,12 @@
 - [x] 6.3 Wire exported My-courses page + lecture bookmarks page to real API + fix contract drift. **AC:** bookmark toggle reflected. (Also closed a Phase 5-flagged gap: bookmark/completion state now survives a page reload via the new bulk per-lecture-progress endpoint.)
 
 ## Phase 7 — QBank engine (backend-dev heavy)
-- [ ] 7.1 `/qbank/meta` (categories from enrollments, taxonomy, live counts incl. pools). **AC:** counts match seed math.
-- [ ] 7.2 Test creation service: filters+pool resolution, random frozen snapshot, ACTIVE_TEST_EXISTS. **AC:** tests: filter honoring, pool 'incorrect' only returns past-wrong, count clamps 5–200.
-- [ ] 7.3 Runner APIs: get session (no is_correct leak in exam mode), answer PATCH (practice returns feedback), server time-left, submit scoring + history upsert + daily stats, abandon, auto-submit on expiry. **AC:** tests: leak check, timing enforcement (late answer rejected), resume mid-test, scoring math incl. skipped.
-- [ ] 7.4 Bookmarks + review payload + history list APIs. **AC:** review only post-completion (403 before).
-- [ ] 7.5 Wire exported TestRunner UI (palette, flags, keyboard, timer, practice inline feedback, offline retry queue) + create-test wizard + resume banner to real API + fix contract drift. **AC:** vitest runner reducer; manual script: full 10-Q practice + exam runs.
-- [ ] 7.6 Wire exported Result + Review + History + Bookmarks pages (incl. retest-incorrect one-click) to real API + fix contract drift. **AC:** numbers match server response exactly.
+- [x] 7.1 `/qbank/meta` (categories from enrollments, taxonomy, live counts incl. pools). **AC:** counts match seed math.
+- [x] 7.2 Test creation service: filters+pool resolution, random frozen snapshot, ACTIVE_TEST_EXISTS. **AC:** tests: filter honoring, pool 'incorrect' only returns past-wrong, count clamps 5–200. (Count is rejected 422 outside [5,200], not silently clamped — see DECISIONS.md.)
+- [x] 7.3 Runner APIs: get session (no is_correct leak in exam mode), answer PATCH (practice returns feedback), server time-left, submit scoring + history upsert + daily stats, abandon, auto-submit on expiry. **AC:** tests: leak check, timing enforcement (late answer rejected), resume mid-test, scoring math incl. skipped. (Deep-scan leak test for exam AND practice mode; lazy auto-submit-on-access.)
+- [x] 7.4 Bookmarks + review payload + history list APIs. **AC:** review only post-completion (403 before). (Also added GET /qbank/questions/{bookmarked,incorrect} listing endpoints as a gap-closure follow-up — see DECISIONS.md.)
+- [x] 7.5 Wire exported TestRunner UI (palette, flags, keyboard, timer, practice inline feedback, offline retry queue) + create-test wizard + resume banner to real API + fix contract drift. **AC:** vitest runner reducer; manual script: full 10-Q practice + exam runs. (Both live-verified end-to-end with real scores.)
+- [x] 7.6 Wire exported Result + Review + History + Bookmarks pages (incl. retest-incorrect one-click) to real API + fix contract drift. **AC:** numbers match server response exactly.
 
 ## Phase 8 — Analytics + Mock exams
 - [ ] 8.1 Analytics endpoint (overall, subject/system arrays, strengths/weaknesses, series by range) + nightly user_daily_stats cron + question difficulty denormal cron. **AC:** aggregates match hand-computed seed fixture.
