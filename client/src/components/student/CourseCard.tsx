@@ -7,6 +7,16 @@ import { CourseModuleBreakdown } from "./CourseModuleBreakdown";
 
 interface CourseCardProps {
   enrollment: Enrollment;
+  /**
+   * Real per-lecture counts, when the caller actually has them (e.g. from
+   * `GET /student/courses/:courseId`'s curriculum response). Deliberately no
+   * fabricated defaults here — `Enrollment` itself only carries an aggregate
+   * `progressPercent` (rendered by the bar above, always real), not a lecture
+   * count; a caller that doesn't have real counts should simply omit these
+   * props rather than pass a guessed number. See DECISIONS.md's Phase
+   * 6.2-6.3 entry (this replaced a hardcoded "X of 28 lectures" fallback that
+   * had nothing to do with the actual enrolled course).
+   */
   totalLectures?: number;
   completedLectures?: number;
   courseSlug?: string;
@@ -15,8 +25,8 @@ interface CourseCardProps {
 
 export const CourseCard: React.FC<CourseCardProps> = ({
   enrollment,
-  totalLectures = 28,
-  completedLectures = 12,
+  totalLectures,
+  completedLectures,
   courseSlug = "nre-step-1-complete",
   showModuleBreakdownInitially = false,
 }) => {
@@ -25,7 +35,9 @@ export const CourseCard: React.FC<CourseCardProps> = ({
   const isExpired = enrollment.status === "expired" || (enrollment.remainingDays !== undefined && enrollment.remainingDays <= 0);
   const isExpiringSoon = !isExpired && enrollment.remainingDays !== undefined && enrollment.remainingDays <= 14;
 
-  const remainingLectures = Math.max(0, totalLectures - completedLectures);
+  const hasRealLectureCounts =
+    typeof totalLectures === "number" && typeof completedLectures === "number" && totalLectures > 0;
+  const remainingLectures = hasRealLectureCounts ? Math.max(0, totalLectures! - completedLectures!) : undefined;
 
   // Render Expiry Badge based on the three states
   const renderExpiryBadge = () => {
@@ -89,10 +101,12 @@ export const CourseCard: React.FC<CourseCardProps> = ({
               variant={isExpired ? "danger" : isExpiringSoon ? "warning" : "teal"}
               animated
             />
-            <div className="flex justify-between items-center text-[11px] text-slate-500 pt-0.5 font-medium">
-              <span>{completedLectures} of {totalLectures} lectures completed</span>
-              <span className="font-bold text-slate-700">{remainingLectures} remaining</span>
-            </div>
+            {hasRealLectureCounts && (
+              <div className="flex justify-between items-center text-[11px] text-slate-500 pt-0.5 font-medium">
+                <span>{completedLectures} of {totalLectures} lectures completed</span>
+                <span className="font-bold text-slate-700">{remainingLectures} remaining</span>
+              </div>
+            )}
           </div>
         </div>
 

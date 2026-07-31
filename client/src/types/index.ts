@@ -96,6 +96,14 @@ export interface Lecture {
   isPublished: boolean;
   sortOrder: number;
   watchedSeconds?: number;
+  /**
+   * Last watched playback position in seconds — distinct from
+   * `watchedSeconds` (cumulative watched time). Populated by
+   * `GET /student/courses/:courseId`'s bulk per-lecture progress merge
+   * (server/src/services/studentCourseService.js); undefined from endpoints
+   * that don't compute it (e.g. the public catalog).
+   */
+  lastPositionSeconds?: number;
   isCompleted?: boolean;
   isBookmarked?: boolean;
 }

@@ -15,11 +15,70 @@ import {
 } from "lucide-react";
 import { Card, Button, Badge, ToastSystem, EmptyState, Skeleton } from "../../components/ui";
 import { SecurePlayer } from "../../components/player/SecurePlayer";
-import { coursesApi } from "../../api/endpoints/courses";
-import { studentApi } from "../../api/endpoints/student";
+import { studentApi, CourseCurriculumResponse } from "../../api/endpoints/student";
 import { Course, CourseSection, Lecture } from "../../types";
 
 type LoadState = "loading" | "error" | "empty" | "data";
+
+/**
+ * Resolves the real, enrollment-scoped curriculum (sections + lectures, with
+ * per-lecture progress/bookmark state already merged in by the backend) for
+ * whichever enrolled course owns the requested lecture/course id, via
+ * `GET /student/courses/:courseId`
+ * (server/src/services/studentCourseService.js#getCourseCurriculum).
+ *
+ * Replaces the previous approach of scanning the PUBLIC catalog
+ * (`coursesApi.getCourses()` + `getCourseWithSections()`) and guessing which
+ * course owned a lecture id — that never merged real per-lecture progress or
+ * bookmark state, which is exactly the reload-durability gap Phase 5.4-5.5
+ * flagged (see DECISIONS.md). Now that `GET /student/courses/:courseId`
+ * exists (Phase 6.1) and returns that state directly, resolution is scoped
+ * to the student's own enrollments instead of the whole public catalog —
+ * both more correct (a student should only ever land in the player for a
+ * course they're enrolled in) and cheaper (a student typically has a
+ * handful of enrollments, not the entire catalog).
+ *
+ * - `/app/courses/:id/player` (routeCourseId known): fetch it directly.
+ * - `/app/learn/:lectureId` (only routeLectureId known, e.g. "Resume
+ *   Lecture" links and Next/Previous navigation): scan the student's own
+ *   enrollments for whichever one actually contains that lecture id.
+ * - Both known but mismatched (a stale/incorrect link): falls through to
+ *   scanning the student's other enrollments too, same as the old code's
+ *   "try the hinted course first, then every other candidate" fallback.
+ */
+async function resolveEnrolledCourseCurriculum(
+  routeCourseId: number | undefined,
+  routeLectureId: number | undefined
+): Promise<CourseCurriculumResponse | null> {
+  const containsLecture = (detail: CourseCurriculumResponse) =>
+    !routeLectureId || detail.sections.some((s) => (s.lectures || []).some((l) => l.id === routeLectureId));
+
+  if (routeCourseId) {
+    try {
+      const detail = await studentApi.getEnrolledCourseDetails(routeCourseId);
+      if (containsLecture(detail)) return detail;
+    } catch {
+      // Not enrolled / expired / course unpublished — fall through to
+      // scanning other enrollments below, in case the link was stale.
+    }
+  }
+
+  if (!routeLectureId) return null;
+
+  const enrollments = await studentApi.getMyEnrollments();
+  const candidateCourseIds = [...new Set(enrollments.map((e) => e.courseId))].filter((id) => id !== routeCourseId);
+
+  for (const courseId of candidateCourseIds) {
+    try {
+      const detail = await studentApi.getEnrolledCourseDetails(courseId);
+      if (containsLecture(detail)) return detail;
+    } catch {
+      // Not enrolled / expired / course unpublished — skip and try the next one.
+    }
+  }
+
+  return null;
+}
 
 export const CoursePlayerPage: React.FC = () => {
   const { id, lectureId } = useParams<{ id?: string; lectureId?: string }>();
@@ -39,17 +98,13 @@ export const CoursePlayerPage: React.FC = () => {
   const [activeLectureId, setActiveLectureId] = useState<number | null>(null);
   const sectionsRef = useRef<CourseSection[]>([]);
 
-  // Real per-lecture bookmark/completion state. There is no bulk
-  // "curriculum + per-lecture progress" endpoint yet — `GET
-  // /student/courses/:courseId` is docs/04_API_SPEC.md §3's planned source
-  // for that, but it's Phase 6 (docs/07_EXECUTION_PLAN.md), not built. This
-  // page instead seeds from the two real signals Phase 5 *does* expose
-  // (`GET /student/bookmarks/lectures`, which also reports `isCompleted`
-  // for whichever lectures happen to be bookmarked) and otherwise fills in
-  // live as the viewer actually plays lectures this session (SecurePlayer's
-  // `onComplete` callback, itself driven by the real `/complete` and
-  // `/play`+resume-ratio signals — see playerLogic.ts's
-  // `inferAlreadyCompletedFromResume`). See DECISIONS.md 2026-07-31.
+  // Real per-lecture bookmark/completion state, seeded directly from `GET
+  // /student/courses/:courseId`'s merged curriculum response (see
+  // `resolveEnrolledCourseCurriculum` above and the loader effect below) —
+  // real, reload-durable server state, not a best-effort inference. Local
+  // optimistic updates still layer on top as the viewer plays/bookmarks
+  // lectures this session (SecurePlayer's `onComplete` callback,
+  // `handleBookmarkToggle`'s real POST/DELETE calls below).
   const [bookmarkedLectureIds, setBookmarkedLectureIds] = useState<Set<number>>(new Set());
   const [completedLectureIds, setCompletedLectureIds] = useState<Set<number>>(new Set());
   const [bookmarkPending, setBookmarkPending] = useState(false);
@@ -62,39 +117,14 @@ export const CoursePlayerPage: React.FC = () => {
     sectionsRef.current = sections;
   }, [sections]);
 
-  // Seed real bookmark + (partial) completion state once per mount.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const bookmarks = await studentApi.getBookmarkedLectures();
-        if (cancelled) return;
-        setBookmarkedLectureIds(new Set(bookmarks.map((l) => l.id)));
-        setCompletedLectureIds((prev) => {
-          const next = new Set(prev);
-          bookmarks.forEach((l) => {
-            if (l.isCompleted) next.add(l.id);
-          });
-          return next;
-        });
-      } catch (err) {
-        // Non-fatal — bookmark icons just default to "not bookmarked" until toggled.
-        console.error("Failed to load bookmarked lectures:", err);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Resolve the real curriculum (sections + lectures, in real DB order) for
-  // whichever course owns the requested lecture/course id, via the public
-  // catalog (server/src/services/publicService.js#getCourseBySlug — already
-  // real, already published data; access to the actual signed video URL is
-  // separately, correctly gated by SecurePlayer's own `/play` call, which
-  // enforces enrollment). Fast path: if the lecture we're navigating to
-  // (prev/next/sidebar click) is already in the curriculum we loaded, just
-  // switch the active lecture — no refetch.
+  // Resolve the real, enrollment-scoped curriculum (sections + lectures, in
+  // real DB order, with per-lecture progress/bookmark state already merged
+  // in) via `resolveEnrolledCourseCurriculum` above. Access to the actual
+  // signed video URL is separately, correctly gated by SecurePlayer's own
+  // `/play` call, which enforces enrollment independently of this page.
+  // Fast path: if the lecture we're navigating to (prev/next/sidebar click)
+  // is already in the curriculum we loaded, just switch the active lecture
+  // — no refetch.
   useEffect(() => {
     if (routeLectureId) {
       const alreadyLoaded = sectionsRef.current.some((s) => (s.lectures || []).some((l) => l.id === routeLectureId));
@@ -109,28 +139,7 @@ export const CoursePlayerPage: React.FC = () => {
       setLoadState("loading");
       setLoadErrorMsg("");
       try {
-        const allCourses = await coursesApi.getCourses();
-        if (allCourses.length === 0) {
-          throw new Error("No courses are currently available.");
-        }
-
-        const knownCourse = routeCourseId ? allCourses.find((c) => c.id === routeCourseId) : undefined;
-        const candidates = knownCourse ? [knownCourse, ...allCourses.filter((c) => c.id !== knownCourse.id)] : allCourses;
-
-        let resolved: { course: Course; sections: CourseSection[] } | null = null;
-        for (const candidate of candidates) {
-          try {
-            const detail = await coursesApi.getCourseWithSections(candidate.slug);
-            const hasTargetLecture =
-              !routeLectureId || detail.sections.some((s) => (s.lectures || []).some((l) => l.id === routeLectureId));
-            if (candidate.id === routeCourseId || hasTargetLecture) {
-              resolved = detail;
-              break;
-            }
-          } catch {
-            // Unpublished/broken course — skip and try the next candidate.
-          }
-        }
+        const resolved = await resolveEnrolledCourseCurriculum(routeCourseId, routeLectureId);
 
         if (cancelled) return;
 
@@ -138,8 +147,8 @@ export const CoursePlayerPage: React.FC = () => {
           setLoadState("error");
           setLoadErrorMsg(
             routeLectureId
-              ? "We couldn't find this lecture in any course curriculum."
-              : "We couldn't load this course's curriculum."
+              ? "We couldn't find this lecture in any of your enrolled courses."
+              : "We couldn't load this course's curriculum. You may not be enrolled in it, or your enrollment may have expired."
           );
           return;
         }
@@ -147,6 +156,10 @@ export const CoursePlayerPage: React.FC = () => {
         const allLecturesFlat = resolved.sections.flatMap((s) => s.lectures || []);
         setCourse(resolved.course);
         setSections(resolved.sections);
+        // Real, reload-durable bookmark/completion state straight from the
+        // backend's merged curriculum response — not a best-effort guess.
+        setBookmarkedLectureIds(new Set(allLecturesFlat.filter((l) => l.isBookmarked).map((l) => l.id)));
+        setCompletedLectureIds(new Set(allLecturesFlat.filter((l) => l.isCompleted).map((l) => l.id)));
 
         if (allLecturesFlat.length === 0) {
           setLoadState("empty");

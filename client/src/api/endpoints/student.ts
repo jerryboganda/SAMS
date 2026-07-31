@@ -1,7 +1,22 @@
 import { CONFIG } from "../../config";
 import { apiFetch, mockLatency } from "../client";
-import { Enrollment, Lecture, StudentDashboardStats } from "../../types";
+import { Course, CourseSection, Enrollment, Lecture, StudentDashboardStats } from "../../types";
 import { MOCK_ACTIVITIES, MOCK_ANNOUNCEMENTS, MOCK_COURSES, MOCK_ENROLLMENTS, MOCK_NOTIFICATIONS, MOCK_SECTIONS } from "../../mock-data";
+
+/**
+ * `GET /student/courses/:courseId` — full curriculum for one enrolled
+ * course, with bulk per-lecture progress (`isCompleted`, `watchedSeconds`,
+ * `lastPositionSeconds`) and bookmark state (`isBookmarked`) already merged
+ * into every `sections[].lectures[]` entry by the backend
+ * (server/src/services/studentCourseService.js#getCourseCurriculum). This is
+ * the real, reload-durable source CoursePlayerPage.tsx now resolves the
+ * curriculum + ✓/🔖 state from — see DECISIONS.md's Phase 6.2-6.3 entry.
+ */
+export interface CourseCurriculumResponse {
+  course: Course;
+  sections: CourseSection[];
+  progressPercent: number;
+}
 
 export const studentApi = {
   async getDashboardStats(): Promise<StudentDashboardStats> {
@@ -40,10 +55,10 @@ export const studentApi = {
     return apiFetch<Enrollment[]>("/student/courses");
   },
 
-  async getEnrolledCourseDetails(courseId: number) {
+  async getEnrolledCourseDetails(courseId: number): Promise<CourseCurriculumResponse> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 400);
-      const course = MOCK_COURSES.find((c) => c.id === Number(courseId));
+      const course = MOCK_COURSES.find((c) => c.id === Number(courseId)) || MOCK_COURSES[0];
       const sections = MOCK_SECTIONS.filter((s) => s.courseId === Number(courseId));
       return {
         course,
@@ -51,7 +66,7 @@ export const studentApi = {
         progressPercent: 42,
       };
     }
-    return apiFetch<any>(`/student/courses/${courseId}`);
+    return apiFetch<CourseCurriculumResponse>(`/student/courses/${courseId}`);
   },
 
   /**

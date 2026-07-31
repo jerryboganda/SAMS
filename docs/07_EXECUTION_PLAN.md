@@ -52,9 +52,9 @@
 - [x] 5.6 🔒 security-auditor: video abuse cases (direct URL reuse after expiry, other-user lecture IDOR, watermark payload source). **AC:** zero Critical/High. (Found + fixed 1 HIGH: the concurrent-stream lock had a live-reproduced race condition allowing multiple simultaneous sessions; +1 Medium: heartbeat had no rate limit/elapsed-time cross-check. Both fixed and re-verified — see DECISIONS.md.)
 
 ## Phase 6 — Student dashboard (backend-dev + frontend-dev)
-- [ ] 6.1 Dashboard aggregate endpoint (progress %, remaining, continue-watching, study hours 7d/total, expiring, announcements, unread count). **AC:** single query-count budget (≤8 queries), test on seed data.
-- [ ] 6.2 Wire exported dashboard UI (cards, countdown pills, mini chart) to real API + fix contract drift. **AC:** renders seeded demo data correctly.
-- [ ] 6.3 Wire exported My-courses page + lecture bookmarks page to real API + fix contract drift. **AC:** bookmark toggle reflected.
+- [x] 6.1 Dashboard aggregate endpoint (progress %, remaining, continue-watching, study hours 7d/total, expiring, announcements, unread count). **AC:** single query-count budget (≤8 queries), test on seed data. (7 queries per request, measured and asserted in a test, not eyeballed.)
+- [x] 6.2 Wire exported dashboard UI (cards, countdown pills, mini chart) to real API + fix contract drift. **AC:** renders seeded demo data correctly.
+- [x] 6.3 Wire exported My-courses page + lecture bookmarks page to real API + fix contract drift. **AC:** bookmark toggle reflected. (Also closed a Phase 5-flagged gap: bookmark/completion state now survives a page reload via the new bulk per-lecture-progress endpoint.)
 
 ## Phase 7 — QBank engine (backend-dev heavy)
 - [ ] 7.1 `/qbank/meta` (categories from enrollments, taxonomy, live counts incl. pools). **AC:** counts match seed math.

@@ -1,41 +1,72 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { BookOpen, AlertTriangle, ShieldCheck, RefreshCw, ArrowRight, Layers, LayoutGrid, Sparkles } from "lucide-react";
-import { Card, Button, Badge, ProgressBar } from "../../components/ui";
+import { Card, Button, Badge, ProgressBar, EmptyState, Skeleton } from "../../components/ui";
 import { studentApi } from "../../api/endpoints/student";
 import { Enrollment } from "../../types";
+import { splitEnrollmentsByStatus } from "../../utils/enrollments";
 import { CourseCard } from "../../components/student/CourseCard";
 import { CourseModuleBreakdown } from "../../components/student/CourseModuleBreakdown";
 
 type ViewMode = "grid" | "modules";
+type LoadState = "loading" | "error" | "data";
 
 export const MyCoursesPage: React.FC = () => {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadErrorMsg, setLoadErrorMsg] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
-  useEffect(() => {
-    async function fetchEnrollments() {
-      try {
-        setIsLoading(true);
-        const data = await studentApi.getMyEnrollments();
-        setEnrollments(data);
-      } catch (err) {
-        console.error("Failed to load student enrollments", err);
-      } finally {
-        setIsLoading(false);
-      }
+  const fetchEnrollments = useCallback(async () => {
+    setLoadState("loading");
+    setLoadErrorMsg("");
+    try {
+      const data = await studentApi.getMyEnrollments();
+      setEnrollments(data);
+      setLoadState("data");
+    } catch (err: any) {
+      console.error("Failed to load student enrollments", err);
+      setLoadErrorMsg(err?.message || "Failed to load your enrolled courses.");
+      setLoadState("error");
     }
-    fetchEnrollments();
   }, []);
 
-  const activeEnrollments = enrollments.filter(
-    (e) => e.status === "active" && (e.remainingDays === undefined || e.remainingDays > 0)
-  );
+  useEffect(() => {
+    fetchEnrollments();
+  }, [fetchEnrollments]);
 
-  const expiredEnrollments = enrollments.filter(
-    (e) => e.status === "expired" || (e.remainingDays !== undefined && e.remainingDays <= 0)
-  );
+  // `GET /student/courses` deliberately returns every enrollment (active AND
+  // expired) — this split is what turns that flat list into the page's two
+  // sections. See client/src/utils/enrollments.ts.
+  const { active: activeEnrollments, expired: expiredEnrollments } = splitEnrollmentsByStatus(enrollments);
+
+  if (loadState === "loading") {
+    return (
+      <div className="space-y-8 pb-12">
+        <Skeleton variant="text" className="h-8 w-72" />
+        <Skeleton variant="text" className="h-4 w-96" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4">
+          <Skeleton variant="card" className="h-56 rounded-2xl" />
+          <Skeleton variant="card" className="h-56 rounded-2xl" />
+          <Skeleton variant="card" className="h-56 rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="py-12">
+        <EmptyState
+          icon={<AlertTriangle className="w-10 h-10 text-rose-500" />}
+          title="Couldn't load your courses"
+          description={loadErrorMsg}
+          actionLabel="Retry"
+          onAction={fetchEnrollments}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-12">
@@ -112,7 +143,7 @@ export const MyCoursesPage: React.FC = () => {
             <Badge variant="teal" size="sm">{activeEnrollments.length} Active Courses</Badge>
           </div>
 
-          {activeEnrollments.length === 0 && !isLoading ? (
+          {activeEnrollments.length === 0 ? (
             <Card className="p-8 text-center space-y-3 bg-slate-50 border-dashed border-slate-300">
               <BookOpen className="w-10 h-10 text-slate-400 mx-auto" />
               <h3 className="text-sm font-bold text-[#0E2A47]">No Active Course Subscriptions</h3>
@@ -129,8 +160,6 @@ export const MyCoursesPage: React.FC = () => {
                 <CourseCard
                   key={e.id}
                   enrollment={e}
-                  totalLectures={28}
-                  completedLectures={Math.round((e.progressPercent || 0) * 0.28)}
                   courseSlug={e.courseId === 1 ? "nre-step-1-complete" : e.courseId === 2 ? "smle-crash-course" : "mbbs-clinical-foundations"}
                 />
               ))}
@@ -158,8 +187,6 @@ export const MyCoursesPage: React.FC = () => {
               <CourseCard
                 key={e.id}
                 enrollment={e}
-                totalLectures={28}
-                completedLectures={28}
                 courseSlug={e.courseId === 1 ? "nre-step-1-complete" : e.courseId === 2 ? "smle-crash-course" : "mbbs-clinical-foundations"}
               />
             ))}

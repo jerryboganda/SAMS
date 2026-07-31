@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../stores/authStore";
 import { Badge, Drawer } from "../ui";
-import { MOCK_NOTIFICATIONS } from "../../mock-data";
+import { studentApi } from "../../api/endpoints/student";
 import { StudentGlobalSearch } from "../student/StudentGlobalSearch";
 import { StudentGuidedTour } from "../student/StudentGuidedTour";
 
@@ -33,8 +33,28 @@ export const StudentLayout: React.FC = () => {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  // Real unread count from GET /student/dashboard's `unreadNotificationsCount`
+  // — there's no real `GET /notifications` list endpoint yet (only the
+  // dashboard aggregate ships it), so this is the badge count only; the
+  // popover below shows a count-based summary instead of fabricated
+  // per-notification content. See DECISIONS.md's Phase 6.2-6.3 entry.
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const unreadCount = MOCK_NOTIFICATIONS.filter((n) => !n.isRead).length;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const stats = await studentApi.getDashboardStats();
+        if (!cancelled) setUnreadCount(stats.unreadNotificationsCount);
+      } catch (err) {
+        // Non-fatal — the badge just stays at 0 until the next successful load.
+        console.error("Failed to load unread notification count", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sidebarNavItems = [
     { label: "Dashboard", path: "/app", icon: LayoutDashboard },
@@ -182,13 +202,15 @@ export const StudentLayout: React.FC = () => {
                       View All
                     </Link>
                   </div>
-                  <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto py-1">
-                    {MOCK_NOTIFICATIONS.map((n) => (
-                      <div key={n.id} className="py-2.5 text-xs">
-                        <p className="font-semibold text-[#1E293B]">{n.title}</p>
-                        <p className="text-[#64748B] mt-0.5">{n.body}</p>
-                      </div>
-                    ))}
+                  <div className="py-4 text-xs text-center">
+                    {unreadCount > 0 ? (
+                      <p className="text-[#1E293B]">
+                        You have <span className="font-bold text-[#0E2A47]">{unreadCount}</span> unread notification
+                        {unreadCount === 1 ? "" : "s"}.
+                      </p>
+                    ) : (
+                      <p className="text-[#64748B]">You're all caught up — no new notifications.</p>
+                    )}
                   </div>
                 </div>
               )}
