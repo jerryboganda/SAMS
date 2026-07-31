@@ -21,14 +21,14 @@
 - [x] 1.6 Seeders per 03 §Seed (admin, student, taxonomy, course+lectures, 200 questions, mock exam, coupon, faculty, faqs, legal pages, demo activity). **AC:** fresh `migrate && seed` succeeds; row counts logged; re-seed is idempotent or guarded.
 
 ## Phase 2 — Auth, devices, sessions (backend-dev → security-auditor)
-- [ ] 2.1 Register + email verification (one_time_tokens, mailer with console transport in dev, templates). **AC:** supertest: register→token→verify→active; duplicate email 409.
-- [ ] 2.2 Login core: bcrypt check, JWT access + rotating refresh (hash stored), cookies set, login_events logged, account lock after 6 fails/15 min, rate limit. **AC:** tests: success, wrong pw, lockout, refresh rotation, reuse-detection revokes family.
-- [ ] 2.3 Device layer: device cookie issue/verify, registration ≤2 active, 3rd device → 423 DEVICE_LIMIT_REACHED, deviceCheck middleware on protected routes. **AC:** test simulates 3 devices; 3rd blocked; existing 2 keep working.
-- [ ] 2.4 Suspicious-login detection (new device / country change via IP lookup lib or header stub / recent fails) → REVERIFY_REQUIRED + emailed code + `/auth/reverify`. **AC:** flagged path requires code; event rows written.
-- [ ] 2.5 Session mgmt: /me, PATCH /me, change-password (revoke others+email), logout, logout-all, forgot/reset password. **AC:** endpoint tests incl. token expiry.
-- [ ] 2.6 TOTP 2FA setup/enable/disable + backup codes; login honors TWOFA_REQUIRED. **AC:** otplib-generated codes pass; backup code single-use.
-- [ ] 2.7 requireRole middleware + audit middleware skeleton (writes audit_logs). **AC:** admin-only route 403 for student; audit row on sample mutation.
-- [ ] 2.8 🔒 security-auditor pass on Phase 2 scope. **AC:** zero Critical/High.
+- [x] 2.1 Register + email verification (one_time_tokens, mailer with console transport in dev, templates). **AC:** supertest: register→token→verify→active; duplicate email 409.
+- [x] 2.2 Login core: bcrypt check, JWT access + rotating refresh (hash stored), cookies set, login_events logged, account lock after 6 fails/15 min, rate limit. **AC:** tests: success, wrong pw, lockout, refresh rotation, reuse-detection revokes family.
+- [x] 2.3 Device layer: device cookie issue/verify, registration ≤2 active, 3rd device → 423 DEVICE_LIMIT_REACHED, deviceCheck middleware on protected routes. **AC:** test simulates 3 devices; 3rd blocked; existing 2 keep working.
+- [x] 2.4 Suspicious-login detection (new device / country change via IP lookup lib or header stub / recent fails) → REVERIFY_REQUIRED + emailed code + `/auth/reverify`. **AC:** flagged path requires code; event rows written.
+- [x] 2.5 Session mgmt: /me, PATCH /me, change-password (revoke others+email), logout, logout-all, forgot/reset password. **AC:** endpoint tests incl. token expiry.
+- [x] 2.6 TOTP 2FA setup/enable/disable + backup codes; login honors TWOFA_REQUIRED. **AC:** otplib-generated codes pass; backup code single-use.
+- [x] 2.7 requireRole middleware + audit middleware skeleton (writes audit_logs). **AC:** admin-only route 403 for student; audit row on sample mutation.
+- [x] 2.8 🔒 security-auditor pass on Phase 2 scope. **AC:** zero Critical/High. (1 HIGH + 2 Medium + 2 Low found and fixed; re-verified — see DECISIONS.md.)
 
 ## Phase 3 — Public site (backend-dev + frontend-dev in parallel after 3.1)
 - [ ] 3.1 Public API: home aggregate, courses list/detail, faculty, faqs, pages/:key, contact (rate-limited, email), sample-questions. **AC:** supertest all; unpublished course invisible.

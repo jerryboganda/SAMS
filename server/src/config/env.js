@@ -24,6 +24,10 @@ dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 
 export const DEV_INSECURE_JWT_SECRET = 'dev-insecure-jwt-secret-change-me';
 export const DEV_INSECURE_JWT_REFRESH_SECRET = 'dev-insecure-jwt-refresh-secret-change-me';
+// 32 bytes / 64 hex chars of zeroes — obviously insecure, same pattern as the
+// JWT secrets above: lets the app boot with zero config in dev/test, but a
+// loud startup warning (below) makes it impossible to miss in a real deploy.
+export const DEV_INSECURE_APP_ENCRYPTION_KEY = '0'.repeat(64);
 
 const boolFromEnv = z
   .union([z.boolean(), z.string()])
@@ -38,6 +42,13 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(1).default(DEV_INSECURE_JWT_SECRET),
   JWT_REFRESH_SECRET: z.string().min(1).default(DEV_INSECURE_JWT_REFRESH_SECRET),
   COOKIE_SECURE: boolFromEnv,
+  // AES-256-GCM key for encrypting secrets at rest (currently: users.twofa_secret
+  // — docs/10_SECURITY_CHECKLIST.md §B). Must be exactly 32 bytes, hex-encoded
+  // (64 hex chars) — generate a real one with `openssl rand -hex 32`.
+  APP_ENCRYPTION_KEY: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'APP_ENCRYPTION_KEY must be 64 hex characters (32 bytes)')
+    .default(DEV_INSECURE_APP_ENCRYPTION_KEY),
 
   DB_HOST: z.string().default('127.0.0.1'),
   DB_PORT: z.coerce.number().int().positive().default(3306),
@@ -98,6 +109,12 @@ if (env.NODE_ENV !== 'test') {
     console.warn(
       '[env] WARNING: JWT_REFRESH_SECRET is using the insecure development default. ' +
         'Set a real secret via JWT_REFRESH_SECRET before deploying to production.'
+    );
+  }
+  if (env.APP_ENCRYPTION_KEY === DEV_INSECURE_APP_ENCRYPTION_KEY) {
+    console.warn(
+      '[env] WARNING: APP_ENCRYPTION_KEY is using the insecure development default. ' +
+        'Set a real 32-byte hex key (openssl rand -hex 32) before deploying to production.'
     );
   }
 }

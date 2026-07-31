@@ -7,6 +7,19 @@ export default (sequelize) => {
     static associate(models) {
       associateUser(models, User);
     }
+
+    // Defense-in-depth (security audit 2026-07-31, informational item): every
+    // current response path already serializes users explicitly via
+    // authService.serializeUser() rather than returning a raw model instance,
+    // so this isn't fixing an active leak — it's a safety net so a future
+    // accidental `res.json(user)`/JSON.stringify(user) can't leak secrets.
+    toJSON() {
+      const values = { ...this.get() };
+      delete values.passwordHash;
+      delete values.twofaSecret;
+      delete values.twofaBackupCodes;
+      return values;
+    }
   }
 
   User.init(
