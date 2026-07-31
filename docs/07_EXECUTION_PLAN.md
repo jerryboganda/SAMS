@@ -31,11 +31,11 @@
 - [x] 2.8 🔒 security-auditor pass on Phase 2 scope. **AC:** zero Critical/High. (1 HIGH + 2 Medium + 2 Low found and fixed; re-verified — see DECISIONS.md.)
 
 ## Phase 3 — Public site (backend-dev + frontend-dev in parallel after 3.1)
-- [ ] 3.1 Public API: home aggregate, courses list/detail, faculty, faqs, pages/:key, contact (rate-limited, email), sample-questions. **AC:** supertest all; unpublished course invisible.
-- [ ] 3.2 Wire exported PublicLayout + design tokens + ui kit components to real API + fix contract drift. **AC:** storybook-less demo route renders kit; lint clean.
-- [ ] 3.3 Wire exported pages (Home, Catalog +filter, Course detail curriculum accordion/price box, Faculty, FAQs, Contact, About/legal from settings) to real API + fix contract drift. **AC:** build clean; empty/loading/error states present; mobile snapshots OK.
-- [ ] 3.4 Wire exported auth pages (register +verify sent screen, verify-email, login incl. device-limit & 2FA & reverify branches, forgot/reset) to real API + fix contract drift. **AC:** vitest on form validation; manual-flow script in README.
-- [ ] 3.5 SEO meta (helmet) + server meta-inject for course detail; sitemap.xml + robots.txt routes. **AC:** curl course URL shows correct og:title.
+- [x] 3.1 Public API: home aggregate, courses list/detail, faculty, faqs, pages/:key, contact (rate-limited, email), sample-questions. **AC:** supertest all; unpublished course invisible.
+- [x] 3.2 Wire exported PublicLayout + design tokens + ui kit components to real API + fix contract drift. **AC:** storybook-less demo route renders kit; lint clean. (PublicLayout has no data dependency — verified, nothing to wire.)
+- [x] 3.3 Wire exported pages (Home, Catalog +filter, Course detail curriculum accordion/price box, Faculty, FAQs, Contact, About/legal from settings) to real API + fix contract drift. **AC:** build clean; empty/loading/error states present; mobile snapshots OK.
+- [x] 3.4 Wire exported auth pages (register +verify sent screen, verify-email, login incl. device-limit & 2FA & reverify branches, forgot/reset) to real API + fix contract drift. **AC:** vitest on form validation; manual-flow script in README.
+- [x] 3.5 SEO meta (helmet) + server meta-inject for course detail; sitemap.xml + robots.txt routes. **AC:** curl course URL shows correct og:title. (Verified live; a client-side post-hydration title override for /courses/* is logged as a follow-up in DECISIONS.md, doesn't affect this AC.)
 
 ## Phase 4 — Content admin (backend-dev + frontend-dev)
 - [ ] 4.1 Admin CRUD API: courses(+publish), sections, lectures, reorder endpoints, image upload (multer, mime+5MB, random names). **AC:** tests incl. reorder integrity + upload rejects exe.

@@ -102,6 +102,19 @@ export function newDeviceAlertTemplate({ user, ip, deviceName }) {
   };
 }
 
+export function contactMessageAdminAlertTemplate({ adminEmail, name, email, subject, message }) {
+  return {
+    to: adminEmail,
+    subject: `[SAMS Academy] New contact message${subject ? `: ${subject}` : ''}`,
+    text:
+      `A new contact form submission was received.\n\n` +
+      `Name: ${name}\n` +
+      `Email: ${email}\n` +
+      `Subject: ${subject || '(none)'}\n\n` +
+      `Message:\n${message}`,
+  };
+}
+
 export function passwordChangedTemplate({ user }) {
   return {
     to: user.email,

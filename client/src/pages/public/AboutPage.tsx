@@ -1,10 +1,39 @@
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ShieldCheck, Award, Users, BookOpen, Target, Heart, CheckCircle2, ArrowRight } from "lucide-react";
-import { Card, Badge, Button, StatCard } from "../../components/ui";
+import { ShieldCheck, Award, Users, BookOpen, Target, Heart, CheckCircle2, ArrowRight, AlertTriangle } from "lucide-react";
+import { Card, Badge, Button, StatCard, Skeleton } from "../../components/ui";
+import { publicApi, PageContent } from "../../api/endpoints/public";
 
 export const AboutPage: React.FC = () => {
   const navigate = useNavigate();
+
+  // Only the "Founding Mission" paragraph is backed by real (admin-editable)
+  // content — GET /public/pages/site.about. The rest of this page (hero
+  // copy, stats strip, leadership quote, values grid) is static marketing
+  // copy the backend has no model for; rewriting the whole page around a
+  // single plain-text Settings field would gut a page that's otherwise
+  // fine as shipped (CLAUDE.md §1a: wire, don't rebuild). See DECISIONS.md
+  // 2026-07-31 (Phase 3.2-3.4).
+  const [missionPage, setMissionPage] = useState<PageContent | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadMission = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const data = await publicApi.getPage("site.about");
+      setMissionPage(data);
+    } catch (err: any) {
+      setLoadError(err.message || "Failed to load this section.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMission();
+  }, [loadMission]);
 
   const values = [
     {
@@ -56,12 +85,28 @@ export const AboutPage: React.FC = () => {
         <Card className="p-8 border-slate-200 space-y-4">
           <Badge variant="navy">Our Founding Mission</Badge>
           <h2 className="text-2xl font-bold text-[#0E2A47]">Bridging the Gap Between Medical School and Licensing Success</h2>
-          <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-            Medical students in Pakistan and the Gulf region face rigorous licensing hurdles, including the PMDC NRE Step 1 exam and Middle Eastern licensing exams. SAMS Academy was established to provide structured, high-yield learning materials that mirror actual exam environments.
-          </p>
-          <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-            By combining HD video lectures, system-wise clinical QBank questions, and real-time performance analytics, we help candidates identify their weaknesses early and pass on their first attempt.
-          </p>
+          {isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-2/3" />
+            </div>
+          ) : loadError ? (
+            <div className="flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                {loadError}{" "}
+                <button onClick={loadMission} className="font-bold underline">
+                  Try again
+                </button>
+              </span>
+            </div>
+          ) : (
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed whitespace-pre-line">
+              {missionPage?.content ||
+                "Medical students in Pakistan and the Gulf region face rigorous licensing hurdles, including the PMDC NRE Step 1 exam and Middle Eastern licensing exams. SAMS Academy was established to provide structured, high-yield learning materials that mirror actual exam environments."}
+            </p>
+          )}
         </Card>
 
         <Card className="p-8 border-slate-200 space-y-4 bg-gradient-to-br from-[#0E2A47] to-[#0FA3A3]/80 text-white">

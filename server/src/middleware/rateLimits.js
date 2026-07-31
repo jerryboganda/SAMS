@@ -13,7 +13,11 @@
 // DECISIONS.md.
 import rateLimit from 'express-rate-limit';
 import { env } from '../config/env.js';
-import { RESEND_VERIFICATION_MAX_PER_HOUR, RESEND_VERIFICATION_MAX_PER_IP_PER_HOUR } from '../config/constants.js';
+import {
+  RESEND_VERIFICATION_MAX_PER_HOUR,
+  RESEND_VERIFICATION_MAX_PER_IP_PER_HOUR,
+  CONTACT_MAX_PER_HOUR,
+} from '../config/constants.js';
 
 // Exported (not just used locally) so tests/rateLimits.test.js can mount the
 // exact same 429-envelope handler on an isolated, small-window limiter
@@ -66,4 +70,26 @@ export const resendVerificationIpLimiter = rateLimit({
   handler: envelopeHandler('RATE_LIMITED', 'Too many verification requests from this network. Please try again later.'),
 });
 
-export default { authLimiter, resendVerificationLimiter, resendVerificationIpLimiter };
+/**
+ * POST /public/contact: 5 requests / hour / IP (docs/04_API_SPEC.md §8).
+ *
+ * Deliberately NOT raised under NODE_ENV=test like the limiters above — Phase
+ * 3.1's acceptance criteria requires a supertest asserting the 6th request in
+ * an hour actually gets a real 429 (server/tests/public/contact.test.js), so
+ * this one keeps its real production `max` in every environment. Safe to do
+ * because only that one test file's requests ever hit `/public/contact`
+ * (Jest gives each test file — and therefore each fresh `import` of `app.js`
+ * and this limiter's in-memory store — its own module registry, confirmed by
+ * the pattern already relied on by `tests/rateLimits.test.js`), so it can't
+ * produce a spurious 429 in any other suite the way authLimiter's real 10/15
+ * min cap could if left unraised.
+ */
+export const contactLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: CONTACT_MAX_PER_HOUR,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: envelopeHandler('RATE_LIMITED', 'Too many messages sent. Please try again later.'),
+});
+
+export default { authLimiter, resendVerificationLimiter, resendVerificationIpLimiter, contactLimiter };

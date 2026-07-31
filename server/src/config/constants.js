@@ -48,3 +48,27 @@ export const REVERIFY_LOCKOUT_WINDOW_MINUTES = 15;
 
 // --- 2FA --------------------------------------------------------------------
 export const BACKUP_CODES_COUNT = 10;
+
+// --- Public catalog & site (docs/04_API_SPEC.md §2) --------------------------
+// Shared with the Course/Question models' own `exam_category` ENUM — kept
+// here too since publicController.js validates the `?category=` query param
+// against this same list before it ever reaches a DB query.
+export const EXAM_CATEGORIES = ['NRE1', 'USMLE1', 'USMLE2CK', 'SMLE', 'DHA', 'PROMETRIC', 'MBBS', 'OTHER'];
+
+// The only settings keys GET /public/pages/:key may read — see DECISIONS.md
+// 2026-07-31 (Phase 3.1): Phase 9 will add sensitive settings keys (gateway
+// secrets, SMTP creds, bank details) to this same `settings` table, so this
+// route must never generically resolve an arbitrary key by name.
+export const PUBLIC_PAGE_KEYS = ['legal.privacy', 'legal.terms', 'legal.refund', 'site.about'];
+
+export const PUBLIC_HOME_FEATURED_COURSES_LIMIT = 6;
+export const PUBLIC_HOME_FACULTY_PREVIEW_LIMIT = 4;
+export const PUBLIC_HOME_FAQ_PREVIEW_LIMIT = 4;
+
+export const PUBLIC_COURSES_DEFAULT_LIMIT = 100;
+export const PUBLIC_COURSES_MAX_LIMIT = 100;
+
+export const PUBLIC_SAMPLE_QUESTIONS_COUNT = 5;
+
+// POST /public/contact: 5 requests / hour / IP (docs/04_API_SPEC.md §8).
+export const CONTACT_MAX_PER_HOUR = 5;

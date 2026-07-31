@@ -86,10 +86,11 @@ export const RegisterPage: React.FC = () => {
     if (resendCooldown > 0) return;
     setResendNotice("");
     try {
-      setResendNotice("Verification email re-sent successfully! Please check your inbox.");
+      const res = await authApi.resendVerification(email);
+      setResendNotice(res.message || "Verification email re-sent successfully! Please check your inbox.");
       setResendCooldown(60);
-    } catch (err) {
-      setResendNotice("Failed to resend verification email.");
+    } catch (err: any) {
+      setResendNotice(err.message || "Failed to resend verification email. Please try again.");
     }
   };
 

@@ -14,11 +14,14 @@ import {
   PhoneCall,
   CheckCircle2,
   ShieldCheck,
+  MailWarning,
 } from "lucide-react";
 import { AuthLayout } from "../../components/layout/AuthLayout";
 import { Button, Input, Checkbox, Badge, Card } from "../../components/ui";
 import { useAuth } from "../../stores/authStore";
 import { authApi } from "../../api/endpoints/auth";
+import { CONFIG } from "../../config";
+import { resolveLoginErrorScreen } from "./loginErrorScreen";
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -26,14 +29,16 @@ export const LoginPage: React.FC = () => {
   const { login, logout, clearErrors } = useAuth();
 
   // Primary Login Form State
-  const [email, setEmail] = useState("student@samsacademy.com");
-  const [password, setPassword] = useState("Student@123");
+  const [email, setEmail] = useState(CONFIG.USE_MOCK ? "student@samsacademy.com" : "");
+  const [password, setPassword] = useState(CONFIG.USE_MOCK ? "Student@123" : "");
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  // Screen View States: 'normal' | 'device_limit' | 'totp' | 'suspicious' | 'locked'
-  const [activeScreen, setActiveScreen] = useState<"normal" | "device_limit" | "totp" | "suspicious" | "locked">("normal");
+  // Screen View States: 'normal' | 'device_limit' | 'totp' | 'suspicious' | 'locked' | 'email_unverified'
+  const [activeScreen, setActiveScreen] = useState<
+    "normal" | "device_limit" | "totp" | "suspicious" | "locked" | "email_unverified"
+  >("normal");
 
   // Step Inputs
   const [twoFaCode, setTwoFaCode] = useState("");
@@ -45,6 +50,10 @@ export const LoginPage: React.FC = () => {
 
   // Device reset request feedback
   const [deviceResetRequested, setDeviceResetRequested] = useState(false);
+
+  // Resend-verification feedback (EMAIL_NOT_VERIFIED screen)
+  const [resendNotice, setResendNotice] = useState("");
+  const [isResending, setIsResending] = useState(false);
 
   // Check returnTo or next query param
   const searchParams = new URLSearchParams(location.search);
@@ -83,27 +92,33 @@ export const LoginPage: React.FC = () => {
     setErrorMessage("");
     clearErrors();
 
-    // Direct mock detection for specific test email presets
-    if (email.includes("+limit")) {
-      setIsLoading(false);
-      setActiveScreen("device_limit");
-      return;
-    }
-    if (email.includes("+2fa")) {
-      setIsLoading(false);
-      setActiveScreen("totp");
-      return;
-    }
-    if (email.includes("+suspicious") || email.includes("+reverify")) {
-      setIsLoading(false);
-      setActiveScreen("suspicious");
-      return;
-    }
-    if (email.includes("+locked")) {
-      setIsLoading(false);
-      setLockedTimeLeft(900);
-      setActiveScreen("locked");
-      return;
+    // Mock-only test-email shortcuts (Quick Testing Presets panel below) —
+    // these never touch the real API, so they must not fire once the real
+    // backend is live (CONFIG.USE_MOCK === false) or a real user whose email
+    // happens to contain e.g. "+2fa" would get routed to a fake screen
+    // instead of actually logging in. See DECISIONS.md 2026-07-31.
+    if (CONFIG.USE_MOCK) {
+      if (email.includes("+limit")) {
+        setIsLoading(false);
+        setActiveScreen("device_limit");
+        return;
+      }
+      if (email.includes("+2fa")) {
+        setIsLoading(false);
+        setActiveScreen("totp");
+        return;
+      }
+      if (email.includes("+suspicious") || email.includes("+reverify")) {
+        setIsLoading(false);
+        setActiveScreen("suspicious");
+        return;
+      }
+      if (email.includes("+locked")) {
+        setIsLoading(false);
+        setLockedTimeLeft(900);
+        setActiveScreen("locked");
+        return;
+      }
     }
 
     try {
@@ -112,14 +127,10 @@ export const LoginPage: React.FC = () => {
         routeAfterLogin(user.role);
       }
     } catch (err: any) {
-      if (err.code === "DEVICE_LIMIT_REACHED" || err.status === 423) {
-        setActiveScreen("device_limit");
-      } else if (err.code === "REQUIRES_2FA") {
-        setActiveScreen("totp");
-      } else if (err.code === "REVERIFY_REQUIRED") {
-        setActiveScreen("suspicious");
-      } else if (err.code === "ACCOUNT_LOCKED") {
-        setActiveScreen("locked");
+      const screen = resolveLoginErrorScreen(err.code, err.status);
+      if (screen) {
+        if (screen === "locked") setLockedTimeLeft(900);
+        setActiveScreen(screen);
       } else {
         setErrorMessage(err.message || "Invalid credentials provided.");
       }
@@ -128,20 +139,39 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // 2FA TOTP Form Submit
+  // 2FA TOTP Form Submit — the real backend has no standalone
+  // `/auth/2fa/verify` endpoint; the TOTP/backup code must be resubmitted
+  // together with email+password on POST /auth/login (docs/04_API_SPEC.md
+  // §1). Reuses the same `login()` used for the initial submit rather than
+  // authApi.verify2FA() directly, since `login()` already retains the
+  // entered `password` in this component's state.
   const handle2FASubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setErrorMessage("");
     try {
-      const res = await authApi.verify2FA(email, twoFaCode || "123456");
-      if (res.user) {
-        routeAfterLogin(res.user.role);
+      const user = await login({ email, password, twofaCode: twoFaCode || "123456" });
+      if (user) {
+        routeAfterLogin(user.role);
       }
     } catch (err: any) {
       setErrorMessage(err.message || "Invalid verification code.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Resend the verification email from the EMAIL_NOT_VERIFIED screen.
+  const handleResendVerification = async () => {
+    setIsResending(true);
+    setResendNotice("");
+    try {
+      const res = await authApi.resendVerification(email);
+      setResendNotice(res.message || "Verification email sent. Please check your inbox.");
+    } catch (err: any) {
+      setResendNotice(err.message || "Failed to resend verification email. Please try again.");
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -404,6 +434,50 @@ export const LoginPage: React.FC = () => {
   }
 
   // ---------------------------------------------------------------------------
+  // SCREEN 5: EMAIL_NOT_VERIFIED
+  // ---------------------------------------------------------------------------
+  if (activeScreen === "email_unverified") {
+    return (
+      <AuthLayout title="Email Address Not Verified" subtitle="Please verify your email before signing in.">
+        <div className="space-y-5">
+          <Badge variant="warning">403 EMAIL_NOT_VERIFIED</Badge>
+
+          <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
+            <div className="flex items-center gap-2 font-bold text-amber-950">
+              <MailWarning className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Verification Required</span>
+            </div>
+            <p className="leading-relaxed">
+              Your account for <span className="font-bold">{email}</span> is registered but not yet verified. Please check your inbox for the verification link, or request a new one below.
+            </p>
+          </div>
+
+          {resendNotice && (
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+              {resendNotice}
+            </div>
+          )}
+
+          <Button
+            variant="teal"
+            fullWidth
+            size="lg"
+            isLoading={isResending}
+            onClick={handleResendVerification}
+            leftIcon={<RefreshCw className="w-4 h-4" />}
+          >
+            Resend Verification Email
+          </Button>
+
+          <Button variant="outline" fullWidth onClick={() => setActiveScreen("normal")}>
+            Back to Login
+          </Button>
+        </div>
+      </AuthLayout>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // SCREEN 0: STANDARD LOGIN FORM
   // ---------------------------------------------------------------------------
   return (
@@ -436,6 +510,13 @@ export const LoginPage: React.FC = () => {
               🛡️ Admin
             </button>
 
+            {/* The remaining presets only work against the mock login
+                simulation (client/src/api/endpoints/auth.ts) — none of
+                these synthetic emails exist as real seeded accounts, so
+                they're hidden once CONFIG.USE_MOCK is false to avoid
+                misleading real users. See DECISIONS.md 2026-07-31. */}
+            {CONFIG.USE_MOCK && (
+            <>
             <button
               type="button"
               onClick={() => applyPreset("student+limit@samsacademy.com", "Student@123")}
@@ -467,6 +548,8 @@ export const LoginPage: React.FC = () => {
             >
               🔒 Locked
             </button>
+            </>
+            )}
           </div>
         </div>
 

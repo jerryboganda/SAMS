@@ -37,6 +37,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [deviceLimitError, setDeviceLimitError] = useState<{ message: string } | null>(null);
   const [requires2FA, setRequires2FA] = useState<boolean>(false);
   const [pendingEmail, setPendingEmail] = useState<string>("");
+  // Retained only in memory (never persisted) so a completed TWOFA_REQUIRED
+  // challenge can resubmit POST /auth/login with {email,password,twofaCode}
+  // — the real backend has no separate 2FA-verify endpoint that would let
+  // us avoid re-sending the password (see client/src/api/endpoints/auth.ts
+  // and DECISIONS.md 2026-07-31 Phase 3.2-3.4).
+  const [pendingPassword, setPendingPassword] = useState<string>("");
 
   useEffect(() => {
     if (user) {
@@ -77,9 +83,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDeviceLimitError({
           message: err.message || "Account is active on another primary device (423 DEVICE_LIMIT_REACHED).",
         });
-      } else if (err.code === "REQUIRES_2FA") {
+      } else if (err.code === "TWOFA_REQUIRED") {
         setRequires2FA(true);
         setPendingEmail(req.email);
+        setPendingPassword(req.password);
       }
       throw err;
     } finally {
@@ -90,11 +97,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const verify2FA = async (code: string): Promise<User> => {
     setIsLoading(true);
     try {
-      const res = await authApi.verify2FA(pendingEmail, code);
+      const res = await authApi.verify2FA(pendingEmail, pendingPassword, code);
       setUser(res.user);
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(res.user));
       localStorage.setItem(TOKEN_STORAGE_KEY, res.token);
       setRequires2FA(false);
+      setPendingPassword("");
       return res.user;
     } finally {
       setIsLoading(false);

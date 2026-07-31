@@ -10,9 +10,11 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import hpp from 'hpp';
 import { env, REPO_ROOT } from './config/env.js';
+import * as seoController from './controllers/seoController.js';
 import errorHandler from './middleware/errorHandler.js';
 import notFound from './middleware/notFound.js';
 import v1Router from './routes/v1/index.js';
+import seoRouter from './routes/seo.js';
 import logger from './utils/logger.js';
 
 const app = express();
@@ -35,6 +37,11 @@ app.use(globalLimiter);
 // --- API routes -----------------------------------------------------------
 app.use('/api/v1', v1Router);
 
+// --- SEO: robots.txt + sitemap.xml (docs/07_EXECUTION_PLAN.md 3.5) --------
+// Always available regardless of client/dist presence — these are
+// server-generated, not part of the SPA build.
+app.use(seoRouter);
+
 // --- Serve the built client SPA (client/dist), if it exists --------------
 // Guarded: before the first `npm run build`, client/dist doesn't exist yet.
 // Skip gracefully (warn, don't crash) rather than throwing on missing dir.
@@ -52,6 +59,13 @@ if (fs.existsSync(CLIENT_DIST) && fs.existsSync(CLIENT_INDEX_HTML)) {
   );
   // Everything else in dist (favicon, manifest, etc.) — short cache.
   app.use(express.static(CLIENT_DIST, { maxAge: '1h' }));
+
+  // Course-detail SEO meta injection (docs/07_EXECUTION_PLAN.md 3.5) — must
+  // be registered before the generic SPA fallback below so a published
+  // course's request gets a course-specific <title>/og:* tags swap instead
+  // of the generic index.html. Falls through (next()) to the SPA fallback
+  // for invalid/unpublished/nonexistent slugs — not a special 404 case.
+  app.get('/courses/:slug', seoController.courseDetailMeta);
 
   // SPA fallback for deep links (e.g. /courses) — but never for /api/* or
   // /uploads/*, which must fall through to the 404 handler below if

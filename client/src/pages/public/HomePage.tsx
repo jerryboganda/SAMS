@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ShieldCheck,
@@ -15,12 +15,35 @@ import {
   Activity,
   ChevronRight,
   Clock,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
-import { Button, Card, Badge, CourseCard } from "../../components/ui";
-import { MOCK_COURSES, MOCK_FACULTY, MOCK_FAQS } from "../../mock-data";
+import { Button, Card, Badge, CourseCard, Skeleton, EmptyState } from "../../components/ui";
+import { publicApi, HomeData } from "../../api/endpoints/public";
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
+
+  const [homeData, setHomeData] = useState<HomeData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadHome = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const data = await publicApi.getHomeData();
+      setHomeData(data);
+    } catch (err: any) {
+      setLoadError(err.message || "Failed to load homepage content. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHome();
+  }, [loadHome]);
 
   // Testimonials seed data
   const testimonials = [
@@ -108,49 +131,99 @@ export const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* TRUST STATS STRIP */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8 grid grid-cols-2 md:grid-cols-4 gap-6 text-center divide-y md:divide-y-0 md:divide-x divide-slate-100">
-          <div className="space-y-1 pt-3 md:pt-0">
-            <p className="text-3xl sm:text-4xl font-extrabold text-[#0E2A47]">10,000+</p>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Students Prepared</p>
+      {/* TRUST STATS STRIP / FEATURED COURSES — single data fetch (GET /public/home) */}
+      {isLoading ? (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8 grid grid-cols-2 md:grid-cols-4 gap-6">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="space-y-2 text-center">
+                <Skeleton className="h-8 w-20 mx-auto" />
+                <Skeleton className="h-3 w-24 mx-auto" />
+              </div>
+            ))}
           </div>
-          <div className="space-y-1 pt-3 md:pt-0">
-            <p className="text-3xl sm:text-4xl font-extrabold text-[#0FA3A3]">3,000+</p>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">High-Yield Questions</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Card key={i} className="p-4 space-y-4">
+                <Skeleton className="w-full aspect-video rounded-xl" />
+                <Skeleton className="h-6 w-3/4 rounded-md" />
+                <Skeleton className="h-4 w-full rounded-md" />
+                <Skeleton className="h-10 w-full rounded-lg" />
+              </Card>
+            ))}
           </div>
-          <div className="space-y-1 pt-3 md:pt-0">
-            <p className="text-3xl sm:text-4xl font-extrabold text-emerald-600">94.8%</p>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Exam Pass Rate</p>
-          </div>
-          <div className="space-y-1 pt-3 md:pt-0">
-            <p className="text-3xl sm:text-4xl font-extrabold text-[#0E2A47]">150+ hrs</p>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">HD Video Lectures</p>
-          </div>
-        </div>
-      </section>
+        </section>
+      ) : loadError ? (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6">
+          <Card className="p-10 text-center border-rose-200 bg-rose-50/40">
+            <EmptyState
+              icon={<AlertTriangle className="w-10 h-10 text-rose-500" />}
+              title="Couldn't Load Homepage Content"
+              description={loadError}
+              actionText="Try Again"
+              onAction={loadHome}
+            />
+          </Card>
+        </section>
+      ) : (
+        <>
+          {/* TRUST STATS STRIP */}
+          <section className="max-w-7xl mx-auto px-4 sm:px-6">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8 grid grid-cols-2 md:grid-cols-4 gap-6 text-center divide-y md:divide-y-0 md:divide-x divide-slate-100">
+              <div className="space-y-1 pt-3 md:pt-0">
+                <p className="text-3xl sm:text-4xl font-extrabold text-[#0E2A47]">{homeData!.stats.coursesCount}+</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Courses Available</p>
+              </div>
+              <div className="space-y-1 pt-3 md:pt-0">
+                <p className="text-3xl sm:text-4xl font-extrabold text-[#0FA3A3]">
+                  {homeData!.stats.questionsCount.toLocaleString()}+
+                </p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">High-Yield Questions</p>
+              </div>
+              <div className="space-y-1 pt-3 md:pt-0">
+                <p className="text-3xl sm:text-4xl font-extrabold text-emerald-600">{homeData!.stats.facultyCount}</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Expert Faculty</p>
+              </div>
+              <div className="space-y-1 pt-3 md:pt-0">
+                <p className="text-3xl sm:text-4xl font-extrabold text-[#0E2A47]">
+                  {homeData!.stats.videoLecturesCount}
+                </p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">HD Video Lectures</p>
+              </div>
+            </div>
+          </section>
 
-      {/* FEATURED COURSES GRID */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-200 pb-4">
-          <div>
-            <Badge variant="teal" className="mb-2">Targeted Programs</Badge>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0E2A47]">Featured Course Bundles</h2>
-            <p className="text-sm text-slate-600 mt-1">
-              Comprehensive prep packages for NRE Step 1, SMLE, DHA, and MBBS board exams.
-            </p>
-          </div>
-          <Button variant="outline" onClick={() => navigate("/courses")} rightIcon={<ChevronRight className="w-4 h-4" />}>
-            View All Catalog
-          </Button>
-        </div>
+          {/* FEATURED COURSES GRID */}
+          <section className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <Badge variant="teal" className="mb-2">Targeted Programs</Badge>
+                <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0E2A47]">Featured Course Bundles</h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  Comprehensive prep packages for NRE Step 1, SMLE, DHA, and MBBS board exams.
+                </p>
+              </div>
+              <Button variant="outline" onClick={() => navigate("/courses")} rightIcon={<ChevronRight className="w-4 h-4" />}>
+                View All Catalog
+              </Button>
+            </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {MOCK_COURSES.map((course) => (
-            <CourseCard key={course.id} course={course} />
-          ))}
-        </div>
-      </section>
+            {homeData!.featuredCourses.length === 0 ? (
+              <EmptyState
+                icon={<RefreshCw className="w-10 h-10 text-slate-400" />}
+                title="No Courses Published Yet"
+                description="Check back soon — new medical licensing exam prep bundles are on the way."
+              />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {homeData!.featuredCourses.map((course) => (
+                  <CourseCard key={course.id} course={course} />
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
 
       {/* "WHY SAMS" 4-FEATURE GRID */}
       <section className="bg-white py-16 border-y border-slate-200">
@@ -212,37 +285,39 @@ export const HomePage: React.FC = () => {
       </section>
 
       {/* FACULTY PREVIEW ROW */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-200 pb-4">
-          <div>
-            <Badge variant="navy" className="mb-2">Lead Instructors</Badge>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0E2A47]">Learn From Medical Specialists</h2>
-            <p className="text-sm text-slate-600 mt-1">
-              Top faculty guiding you through high-yield concepts and clinical exam strategy.
-            </p>
+      {!isLoading && !loadError && homeData && homeData.faculty.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-200 pb-4">
+            <div>
+              <Badge variant="navy" className="mb-2">Lead Instructors</Badge>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0E2A47]">Learn From Medical Specialists</h2>
+              <p className="text-sm text-slate-600 mt-1">
+                Top faculty guiding you through high-yield concepts and clinical exam strategy.
+              </p>
+            </div>
+            <Button variant="ghost" onClick={() => navigate("/faculty")} rightIcon={<ChevronRight className="w-4 h-4" />}>
+              Meet All Faculty
+            </Button>
           </div>
-          <Button variant="ghost" onClick={() => navigate("/faculty")} rightIcon={<ChevronRight className="w-4 h-4" />}>
-            Meet All Faculty
-          </Button>
-        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {MOCK_FACULTY.map((f) => (
-            <Card key={f.id} className="p-5 text-center space-y-3 border-slate-200 hover:shadow-md transition-shadow">
-              <img
-                src={f.photoUrl}
-                alt={f.name}
-                className="w-20 h-20 rounded-full mx-auto object-cover border-2 border-[#0FA3A3] shadow-xs"
-              />
-              <div>
-                <h3 className="text-base font-bold text-[#0E2A47]">{f.name}</h3>
-                <p className="text-xs font-medium text-[#0FA3A3] mt-0.5">{f.title}</p>
-              </div>
-              <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">{f.bio}</p>
-            </Card>
-          ))}
-        </div>
-      </section>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {homeData.faculty.map((f) => (
+              <Card key={f.id} className="p-5 text-center space-y-3 border-slate-200 hover:shadow-md transition-shadow">
+                <img
+                  src={f.photoUrl}
+                  alt={f.name}
+                  className="w-20 h-20 rounded-full mx-auto object-cover border-2 border-[#0FA3A3] shadow-xs"
+                />
+                <div>
+                  <h3 className="text-base font-bold text-[#0E2A47]">{f.name}</h3>
+                  <p className="text-xs font-medium text-[#0FA3A3] mt-0.5">{f.title}</p>
+                </div>
+                <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">{f.bio}</p>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* TESTIMONIALS CAROUSEL / GRID */}
       <section className="bg-[#0E2A47] text-white py-16 px-4 sm:px-6 rounded-3xl max-w-7xl mx-auto space-y-10 shadow-xl">

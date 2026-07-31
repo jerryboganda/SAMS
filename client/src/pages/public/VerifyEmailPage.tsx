@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { CheckCircle2, XCircle, MailCheck, ArrowRight, RefreshCw, AlertCircle } from "lucide-react";
 import { AuthLayout } from "../../components/layout/AuthLayout";
-import { Button, Card, Badge } from "../../components/ui";
+import { Button, Card, Badge, Input } from "../../components/ui";
 import { authApi } from "../../api/endpoints/auth";
 
 export const VerifyEmailPage: React.FC = () => {
@@ -10,14 +10,28 @@ export const VerifyEmailPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const token = paramToken || searchParams.get("token") || "mock-valid-token-123";
+  // No mock-token fallback here — a missing token means the link is
+  // genuinely malformed (e.g. the user navigated to /verify-email directly).
+  // Sending an empty/fake token to the real API would just produce a
+  // confusing "invalid token" round-trip; short-circuit to the failure
+  // screen instead. See DECISIONS.md 2026-07-31 (Phase 3.2-3.4).
+  const token = paramToken || searchParams.get("token") || "";
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [resendEmail, setResendEmail] = useState("");
   const [resendNotice, setResendNotice] = useState("");
+  const [isResending, setIsResending] = useState(false);
 
   useEffect(() => {
+    if (!token) {
+      setIsLoading(false);
+      setIsSuccess(false);
+      setErrorMsg("This verification link is missing its token. Please use the exact link from your email.");
+      return;
+    }
+
     const verifyToken = async () => {
       setIsLoading(true);
       setErrorMsg("");
@@ -36,7 +50,20 @@ export const VerifyEmailPage: React.FC = () => {
   }, [token]);
 
   const handleResendLink = async () => {
-    setResendNotice("A new verification link has been sent to your email address.");
+    if (!resendEmail.trim()) {
+      setResendNotice("Please enter your email address first.");
+      return;
+    }
+    setIsResending(true);
+    setResendNotice("");
+    try {
+      const res = await authApi.resendVerification(resendEmail.trim());
+      setResendNotice(res.message || "A new verification link has been sent to your email address.");
+    } catch (err: any) {
+      setResendNotice(err.message || "Failed to send a new verification link. Please try again.");
+    } finally {
+      setIsResending(false);
+    }
   };
 
   if (isLoading) {
@@ -101,8 +128,27 @@ export const VerifyEmailPage: React.FC = () => {
           </div>
         )}
 
+        {/* A verification token alone can't tell us who to resend to (the
+            token itself may be invalid/expired) — ask for the email
+            explicitly rather than guessing. See DECISIONS.md 2026-07-31. */}
+        <div className="text-left">
+          <Input
+            label="Email Address"
+            type="email"
+            value={resendEmail}
+            onChange={(e) => setResendEmail(e.target.value)}
+            placeholder="candidate@samsacademy.com"
+          />
+        </div>
+
         <div className="space-y-3 pt-2">
-          <Button variant="teal" fullWidth onClick={handleResendLink} leftIcon={<MailCheck className="w-4 h-4" />}>
+          <Button
+            variant="teal"
+            fullWidth
+            isLoading={isResending}
+            onClick={handleResendLink}
+            leftIcon={<MailCheck className="w-4 h-4" />}
+          >
             Request New Verification Link
           </Button>
 

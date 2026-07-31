@@ -32,7 +32,10 @@ export const authApi = {
         );
       }
       if (req.email.includes("+2fa") && !req.twofaCode) {
-        throw new ApiError("2FA code required. Please enter the 6-digit TOTP code.", "REQUIRES_2FA", 401);
+        // Code name must match the real backend / docs/04_API_SPEC.md §1
+        // exactly (`TWOFA_REQUIRED`, not `REQUIRES_2FA`) — see DECISIONS.md
+        // 2026-07-31 (Phase 3.2-3.4).
+        throw new ApiError("2FA code required. Please enter the 6-digit TOTP code.", "TWOFA_REQUIRED", 401);
       }
       if (req.email.includes("+suspicious") || req.email.includes("+reverify")) {
         throw new ApiError(
@@ -98,7 +101,16 @@ export const authApi = {
     });
   },
 
-  async verify2FA(email: string, code: string): Promise<LoginResponse> {
+  /**
+   * Completes a login that returned `TWOFA_REQUIRED`. The real backend has
+   * no standalone `/auth/2fa/verify` endpoint (that route never existed
+   * server-side — a pre-existing frontend/API contract mismatch, see
+   * DECISIONS.md 2026-07-31 Phase 3.2-3.4): per docs/04_API_SPEC.md §1 and
+   * server/src/services/authService.js#login, the TOTP/backup code is
+   * resubmitted together with email+password on a second call to
+   * `POST /auth/login`. `password` is therefore required here now.
+   */
+  async verify2FA(email: string, password: string, code: string): Promise<LoginResponse> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 300);
       const studentUser = MOCK_USERS.find((u) => u.role === "student")!;
@@ -108,10 +120,7 @@ export const authApi = {
         deviceToken: "mock-device-verified",
       };
     }
-    return apiFetch<LoginResponse>("/auth/2fa/verify", {
-      method: "POST",
-      body: JSON.stringify({ email, code }),
-    });
+    return authApi.login({ email, password, twofaCode: code });
   },
 
   async register(data: { name: string; email: string; password: string; phone?: string }): Promise<{ message: string }> {
@@ -125,6 +134,17 @@ export const authApi = {
     return apiFetch<{ message: string }>("/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  },
+
+  async resendVerification(email: string): Promise<{ message: string }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 400);
+      return { message: "If a pending account exists for this email, a new verification link has been sent." };
+    }
+    return apiFetch<{ message: string }>("/auth/resend-verification", {
+      method: "POST",
+      body: JSON.stringify({ email }),
     });
   },
 

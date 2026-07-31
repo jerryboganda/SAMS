@@ -19,11 +19,12 @@ import {
   Check,
 } from "lucide-react";
 import { Card, Button, Badge, Modal } from "../../components/ui";
-import { MOCK_COURSES, MOCK_SECTIONS, MOCK_FACULTY, MOCK_FAQS, MOCK_ENROLLMENTS } from "../../mock-data";
+import { MOCK_COURSES, MOCK_SECTIONS, MOCK_FAQS, MOCK_ENROLLMENTS } from "../../mock-data";
 import { useAuth } from "../../stores/authStore";
 import { formatPKR, formatDuration } from "../../utils/formatters";
-import { Course, CourseSection, Lecture } from "../../types";
+import { Course, CourseSection, Lecture, FacultyMember } from "../../types";
 import { coursesApi } from "../../api/endpoints/courses";
+import { publicApi } from "../../api/endpoints/public";
 
 export const CourseDetailPage: React.FC = () => {
   const { slug, id } = useParams<{ slug?: string; id?: string }>();
@@ -42,13 +43,22 @@ export const CourseDetailPage: React.FC = () => {
   // Free Preview Modal State
   const [previewLecture, setPreviewLecture] = useState<Lecture | null>(null);
 
+  // The real schema has no course<->faculty relationship (Phase 3.1 finding
+  // — see DECISIONS.md 2026-07-31), so this is the general faculty roster,
+  // not "this course's instructor". Fetched independently of the course
+  // itself and fails silently (empty list just hides the section) so a
+  // faculty-endpoint hiccup never blocks the course page from rendering.
+  const [faculty, setFaculty] = useState<FacultyMember[]>([]);
+
   useEffect(() => {
     async function loadData() {
       setIsLoading(true);
       try {
-        const fetchedCourse = await coursesApi.getCourseBySlug(paramVal);
+        // GET /public/courses/:slug already returns {course, sections} in
+        // one response — see coursesApi.getCourseWithSections for why this
+        // must NOT be two separate calls (DECISIONS.md 2026-07-31).
+        const { course: fetchedCourse, sections: fetchedSections } = await coursesApi.getCourseWithSections(paramVal);
         setCourse(fetchedCourse);
-        const fetchedSections = await coursesApi.getCourseSections(fetchedCourse.id);
         setSections(fetchedSections);
 
         // Open first section by default
@@ -69,6 +79,13 @@ export const CourseDetailPage: React.FC = () => {
     }
     loadData();
   }, [paramVal]);
+
+  useEffect(() => {
+    publicApi
+      .getFaculty()
+      .then(setFaculty)
+      .catch(() => setFaculty([]));
+  }, []);
 
   // Check if current user is enrolled in this course
   const isEnrolled = React.useMemo(() => {
@@ -105,8 +122,6 @@ export const CourseDetailPage: React.FC = () => {
     "High-yield image review for radiology, histopathology, and gross anatomy.",
     "Strategic exam techniques for single-best-answer MCQs.",
   ];
-
-  const facultyMember = MOCK_FACULTY[0];
 
   return (
     <div className="space-y-10 pb-16">
@@ -264,22 +279,41 @@ export const CourseDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Instructor / Faculty Card */}
-          <Card className="p-6 border-slate-200 space-y-4">
-            <h2 className="text-xl font-extrabold text-[#0E2A47]">Course Instructor</h2>
-            <div className="flex flex-col sm:flex-row items-start gap-4">
-              <img
-                src={facultyMember.photoUrl}
-                alt={facultyMember.name}
-                className="w-20 h-20 rounded-full object-cover border-2 border-[#0FA3A3] shrink-0"
-              />
-              <div className="space-y-1.5">
-                <h3 className="text-lg font-bold text-[#0E2A47]">{facultyMember.name}</h3>
-                <p className="text-xs font-semibold text-[#0FA3A3]">{facultyMember.title}</p>
-                <p className="text-xs text-slate-600 leading-relaxed">{facultyMember.bio}</p>
+          {/* Faculty Card — the schema has no course<->faculty relationship,
+              so this shows the general SAMS Academy faculty roster rather
+              than claiming a specific "this course's instructor" (which
+              would be fabricated data). See DECISIONS.md 2026-07-31
+              (Phase 3.2-3.4). Hidden entirely if the roster is empty/fails
+              to load, so it never blocks the rest of the course page. */}
+          {faculty.length > 0 && (
+            <Card className="p-6 border-slate-200 space-y-4">
+              <div>
+                <h2 className="text-xl font-extrabold text-[#0E2A47]">Meet Our Faculty</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  SAMS Academy instructors guiding students across our full course catalog.
+                </p>
               </div>
-            </div>
-          </Card>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {faculty.slice(0, 2).map((member) => (
+                  <div key={member.id} className="flex flex-col sm:flex-row items-start gap-4">
+                    <img
+                      src={member.photoUrl}
+                      alt={member.name}
+                      className="w-20 h-20 rounded-full object-cover border-2 border-[#0FA3A3] shrink-0"
+                    />
+                    <div className="space-y-1.5">
+                      <h3 className="text-lg font-bold text-[#0E2A47]">{member.name}</h3>
+                      <p className="text-xs font-semibold text-[#0FA3A3]">{member.title}</p>
+                      <p className="text-xs text-slate-600 leading-relaxed line-clamp-3">{member.bio}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <Link to="/faculty" className="text-xs font-bold text-[#0FA3A3] hover:underline inline-block">
+                View Full Faculty Roster &rarr;
+              </Link>
+            </Card>
+          )}
 
           {/* FAQ Accordion */}
           <Card className="p-6 border-slate-200 space-y-4">

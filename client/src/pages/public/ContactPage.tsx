@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Mail, Phone, MapPin, Clock, Send, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Card, Input, Textarea, Button, Badge } from "../../components/ui";
+import { publicApi } from "../../api/endpoints/public";
 
 export const ContactPage: React.FC = () => {
   const [name, setName] = useState("");
@@ -12,7 +13,6 @@ export const ContactPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [rateLimitError, setRateLimitError] = useState<string | null>(null);
-  const [submitCount, setSubmitCount] = useState(0);
 
   const validate = () => {
     const errs: Record<string, string> = {};
@@ -40,28 +40,29 @@ export const ContactPage: React.FC = () => {
     if (!validate()) return;
 
     setIsSubmitting(true);
-
-    // Simulate Rate Limit Error trigger
-    if (email.includes("+ratelimit") || submitCount >= 4) {
-      setTimeout(() => {
-        setIsSubmitting(false);
-        setRateLimitError("429 Too Many Requests: You have submitted messages too frequently. Please wait 15 minutes before trying again.");
-      }, 500);
-      return;
-    }
-
-    // Mock API Submission delay
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setSubmitCount((prev) => prev + 1);
-      setSuccessMessage("Thank you for contacting SAMS Academy! Your message has been sent successfully. Our support team will respond within 24 hours.");
+    try {
+      const res = await publicApi.submitContactForm({ name, email, subject, message });
+      setSuccessMessage(
+        res.message ||
+          "Thank you for contacting SAMS Academy! Your message has been sent successfully. Our support team will respond within 24 hours."
+      );
       // Reset Form
       setName("");
       setEmail("");
       setSubject("");
       setMessage("");
       setErrors({});
-    }, 600);
+    } catch (err: any) {
+      if (err.status === 429 || err.code === "RATE_LIMITED") {
+        setRateLimitError(
+          err.message || "You have submitted messages too frequently. Please wait before trying again."
+        );
+      } else {
+        setRateLimitError(err.message || "Failed to send your message. Please try again later.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

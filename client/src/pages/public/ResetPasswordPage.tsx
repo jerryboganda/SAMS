@@ -10,7 +10,11 @@ export const ResetPasswordPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const token = paramToken || searchParams.get("token") || "mock-reset-token-123";
+  // No mock-token fallback — a missing token means the reset link itself is
+  // malformed; the submit handler below checks for this explicitly instead
+  // of sending a fake token to the real API. See DECISIONS.md 2026-07-31
+  // (Phase 3.2-3.4).
+  const token = paramToken || searchParams.get("token") || "";
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -40,6 +44,11 @@ export const ResetPasswordPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage("");
+
+    if (!token) {
+      setErrorMessage("Invalid or missing password reset link. Please request a new one.");
+      return;
+    }
 
     if (!hasMinLength) {
       setErrorMessage("Password must be at least 8 characters long.");
@@ -97,7 +106,18 @@ export const ResetPasswordPage: React.FC = () => {
         {errorMessage && (
           <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
-            <span>{errorMessage}</span>
+            <span>
+              {errorMessage}
+              {!token && (
+                <>
+                  {" "}
+                  <Link to="/forgot-password" className="font-bold underline">
+                    Request a new link
+                  </Link>
+                  .
+                </>
+              )}
+            </span>
           </div>
         )}
 
