@@ -159,6 +159,17 @@ export interface MockExam {
   questionsCount: number;
   bestScore?: number;
   attemptsCount?: number;
+  /** Most-recent FINISHED (completed or abandoned) attempt's timestamp/score/verdict — additive fields
+   * returned by the real `GET /mock-exams` (server/src/services/mockExamService.js#listMockExamsForStudent),
+   * on top of `bestScore`/`attemptsCount`. Undefined when the student has never finished an attempt. */
+  lastAttemptAt?: string;
+  lastScorePercent?: number;
+  lastPassed?: boolean;
+  /** Full ordered question-id sequence — only populated by the admin single-resource GET
+   * (`GET /admin/mock-exams/:id`, server/src/services/adminMockExamService.js#getMockExamById); the admin
+   * list endpoint omits it (each row only needs `questionsCount`). Never present on the student-facing
+   * `GET /mock-exams` response. */
+  questionIds?: number[];
 }
 
 export type TestMode = "practice" | "exam" | "mock";

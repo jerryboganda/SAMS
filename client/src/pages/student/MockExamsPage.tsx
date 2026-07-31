@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Award,
@@ -6,50 +6,66 @@ import {
   FileQuestion,
   Play,
   CheckCircle2,
-  XCircle,
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  AlertCircle,
   Eye,
   ShieldCheck,
-  RotateCcw,
 } from "lucide-react";
-import { Card, Button, Badge, Modal } from "../../components/ui";
+import { Card, Button, Badge, Modal, Skeleton, EmptyState } from "../../components/ui";
 import { qbankApi } from "../../api/endpoints/qbank";
+import { mockExamsApi } from "../../api/endpoints/mock-exams";
+import { ApiError } from "../../api/client";
 import { MockExam, TestSession } from "../../types";
+
+type LoadState = "loading" | "error" | "data";
 
 export const MockExamsPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [mockExams, setMockExams] = useState<MockExam[]>([]);
   const [historyList, setHistoryList] = useState<TestSession[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadErrorMsg, setLoadErrorMsg] = useState("");
 
   // Modal State
   const [selectedMockForModal, setSelectedMockForModal] = useState<MockExam | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+  const [startErrorMsg, setStartErrorMsg] = useState<string | null>(null);
+
+  // 409 ACTIVE_TEST_EXISTS conflict — same "resume or go elsewhere" pattern as CreateTestPage.tsx.
+  const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  const [conflictTestId, setConflictTestId] = useState<number | null>(null);
 
   // Accordion State for Expanded History per Mock Exam ID
   const [expandedExamIds, setExpandedExamIds] = useState<number[]>([]);
 
-  useEffect(() => {
-    async function loadData() {
-      setIsLoading(true);
-      try {
-        const [mocks, history] = await Promise.all([
-          qbankApi.getMockExams(),
-          qbankApi.getTestHistory(),
-        ]);
-        setMockExams(mocks);
-        setHistoryList(history);
-      } catch (err) {
-        console.error("Failed to load mock exams data", err);
-      } finally {
-        setIsLoading(false);
-      }
+  const loadData = useCallback(async () => {
+    setLoadState("loading");
+    setLoadErrorMsg("");
+    try {
+      // Real, top-level `GET /mock-exams` (mockExamsApi) — not qbankApi.getMockExams()'s identical-URL
+      // duplicate — per this task's explicit brief to use mock-exams.ts's own client. History is a
+      // separate real call used only to render each paper's individual past-attempt rows below (the
+      // per-exam aggregates themselves — bestScore/attemptsCount — come straight off `mocks`, server-computed).
+      const [mocks, history] = await Promise.all([
+        mockExamsApi.getMockExams(),
+        qbankApi.getTestHistory(),
+      ]);
+      setMockExams(mocks);
+      setHistoryList(history);
+      setLoadState("data");
+    } catch (err: any) {
+      console.error("Failed to load mock exams data", err);
+      setLoadErrorMsg(err?.message || "Failed to load the national mock exam papers.");
+      setLoadState("error");
     }
-    loadData();
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const toggleExpandHistory = (examId: number) => {
     setExpandedExamIds((prev) =>
@@ -62,35 +78,56 @@ export const MockExamsPage: React.FC = () => {
     setSelectedMockForModal(mock);
   };
 
-  // Confirm & Start Mock Exam
+  // Confirm & Start Mock Exam — the FIXED, admin-configured question paper (server/src/services/
+  // mockExamService.js#startMockExam), never the wizard's random-pool createTest() this page used to
+  // (mis)use as a workaround before this endpoint existed.
   const handleConfirmStart = async () => {
     if (!selectedMockForModal) return;
     setIsStarting(true);
+    setStartErrorMsg(null);
 
     try {
-      const session = await qbankApi.createTest({
-        examCategory: selectedMockForModal.examCategory,
-        mode: "mock",
-        pool: "all",
-        count: selectedMockForModal.questionsCount,
-        timed: true,
-        timeLimitSeconds: selectedMockForModal.durationMinutes * 60,
-      });
-
+      const session = await mockExamsApi.startMockExam(selectedMockForModal.id);
       setSelectedMockForModal(null);
       navigate(`/app/qbank/test/${session.id}`);
     } catch (err: any) {
-      alert(err.message || "Failed to start mock exam session.");
+      const apiErr = err as ApiError;
+      if (apiErr.code === "ACTIVE_TEST_EXISTS" || apiErr.status === 409) {
+        setConflictTestId(apiErr.details?.testId ?? null);
+        setSelectedMockForModal(null);
+        setConflictModalOpen(true);
+      } else if (apiErr.code === "NOT_ENROLLED") {
+        setStartErrorMsg("You are not enrolled in a QBank-enabled course for this exam's category.");
+      } else if (apiErr.code === "CONFLICT") {
+        setStartErrorMsg("This exam paper has no questions configured yet — please check back later.");
+      } else {
+        setStartErrorMsg(apiErr.message || "Failed to start mock exam session.");
+      }
     } finally {
       setIsStarting(false);
     }
   };
 
-  if (isLoading) {
+  if (loadState === "loading") {
     return (
-      <div className="py-20 text-center space-y-3 max-w-xl mx-auto">
-        <div className="w-10 h-10 border-4 border-[#0FA3A3] border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-xs font-bold text-slate-500">Loading National Grand Mock Exam Papers...</p>
+      <div className="space-y-8 pb-12 max-w-5xl mx-auto">
+        <Skeleton variant="text" className="h-8 w-80" />
+        <Skeleton variant="card" className="h-56 rounded-2xl" />
+        <Skeleton variant="card" className="h-56 rounded-2xl" />
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="py-12 max-w-xl mx-auto">
+        <EmptyState
+          icon={<AlertCircle className="w-10 h-10 text-rose-500" />}
+          title="Couldn't load mock exams"
+          description={loadErrorMsg}
+          actionLabel="Retry"
+          onAction={loadData}
+        />
       </div>
     );
   }
@@ -111,20 +148,34 @@ export const MockExamsPage: React.FC = () => {
         </Badge>
       </div>
 
+      {startErrorMsg && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-bold flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          {startErrorMsg}
+        </div>
+      )}
+
+      {mockExams.length === 0 && (
+        <EmptyState
+          icon={<Award className="w-10 h-10 text-slate-400" />}
+          title="No mock exam papers available yet"
+          description="Published national grand mock papers for your enrolled QBank-enabled courses will appear here."
+        />
+      )}
+
       {/* List of Mock Papers */}
       <div className="space-y-6">
         {mockExams.map((mock) => {
-          // Filter history attempts matching this mock paper category or mode="mock"
-          const mockAttempts = historyList.filter(
-            (h) => h.mode === "mock" || h.examCategory === mock.examCategory
-          );
-          const attemptsCount = mockAttempts.length || mock.attemptsCount || 0;
-
-          // Best Score calculation
-          const scores = mockAttempts
-            .map((h) => h.scorePercent ?? 0)
-            .concat(mock.bestScore ? [mock.bestScore] : []);
-          const bestScore = scores.length > 0 ? Math.max(...scores) : 0;
+          // Exact match on `mockExamId` — the real session field the server always sets for a
+          // mock-mode attempt started via startMockExam (server/src/services/mockExamService.js). Matching
+          // on category/mode alone (as this page used to) would double-count attempts across different
+          // papers that happen to share an exam category.
+          const mockAttempts = historyList.filter((h) => h.mockExamId === mock.id);
+          // Server-computed aggregates (mockExamsApi.getMockExams()) are authoritative — never
+          // recomputed client-side, matching docs/07_EXECUTION_PLAN.md 7.6's "numbers match server
+          // response exactly" precedent.
+          const attemptsCount = mock.attemptsCount ?? 0;
+          const bestScore = mock.bestScore ?? 0;
 
           const isExpanded = expandedExamIds.includes(mock.id);
 
@@ -360,6 +411,45 @@ export const MockExamsPage: React.FC = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* 409 ACTIVE_TEST_EXISTS Conflict Modal — mirrors CreateTestPage.tsx's identical real-endpoint case */}
+      <Modal
+        isOpen={conflictModalOpen}
+        onClose={() => setConflictModalOpen(false)}
+        title="Active Test Block in Progress"
+        size="md"
+      >
+        <div className="space-y-5 p-1 text-center">
+          <div className="w-14 h-14 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto border border-amber-200">
+            <AlertTriangle className="w-7 h-7" />
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-lg font-black text-[#0E2A47]">Unfinished Test Session Detected</h3>
+            <p className="text-xs text-slate-600 leading-relaxed max-w-sm mx-auto">
+              You already have an active test block{conflictTestId ? ` (Session #${conflictTestId})` : ""} in
+              progress. Only one active test block can exist at a time — finish or abandon it before starting
+              this mock exam.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+            <Button
+              variant="teal"
+              size="md"
+              fullWidth
+              disabled={!conflictTestId}
+              onClick={() => conflictTestId && navigate(`/app/qbank/session/${conflictTestId}`)}
+              icon={<Play className="w-4 h-4 fill-current" />}
+            >
+              Resume Active Test
+            </Button>
+            <Button variant="ghost" size="md" fullWidth onClick={() => setConflictModalOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

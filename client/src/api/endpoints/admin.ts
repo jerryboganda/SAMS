@@ -882,6 +882,67 @@ export const adminApi = {
     return apiFetch<MockExam>("/admin/mock-exams", { method: "POST", body: JSON.stringify(data) });
   },
 
+  /** `GET /admin/mock-exams/:id` — the only response that includes the full ordered `questionIds`
+   * sequence (server/src/services/adminMockExamService.js#getMockExamById); the list endpoint above omits
+   * it. The Mock Exam Builder's question-picker tab loads its initial selection from this call, never from
+   * a client-side guess (e.g. "first N questions"). */
+  async getMockExamById(id: number): Promise<MockExam> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 200);
+      const found = [MOCK_EXAM_PAPER].find((e) => e.id === id) || MOCK_EXAM_PAPER;
+      return { ...found, questionIds: MOCK_QUESTIONS.slice(0, found.questionsCount).map((q) => q.id) };
+    }
+    return apiFetch<MockExam>(`/admin/mock-exams/${id}`);
+  },
+
+  async updateMockExam(id: number, data: Partial<MockExam>): Promise<MockExam> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 300);
+      return { id, questionsCount: 0, title: "", examCategory: "NRE1", durationMinutes: 60, passPercent: 60, isPublished: true, ...data } as MockExam;
+    }
+    return apiFetch<MockExam>(`/admin/mock-exams/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  },
+
+  async deleteMockExam(id: number): Promise<{ success: boolean }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      return { success: true };
+    }
+    return apiFetch<{ success: boolean }>(`/admin/mock-exams/${id}`, { method: "DELETE" });
+  },
+
+  async publishMockExam(id: number): Promise<MockExam> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      return this.getMockExamById(id).then((e) => ({ ...e, isPublished: true }));
+    }
+    return apiFetch<MockExam>(`/admin/mock-exams/${id}/publish`, { method: "POST" });
+  },
+
+  async unpublishMockExam(id: number): Promise<MockExam> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      return this.getMockExamById(id).then((e) => ({ ...e, isPublished: false }));
+    }
+    return apiFetch<MockExam>(`/admin/mock-exams/${id}/unpublish`, { method: "POST" });
+  },
+
+  /** `PUT /admin/mock-exams/:id/questions` — a full, transactional REPLACE of the paper's whole ordered
+   * question set (server/src/services/adminMockExamService.js#replaceMockExamQuestions), not granular
+   * per-item CRUD like Phase 4's curriculum sections/lectures — so the caller always sends the complete
+   * current ordered id list, never a diff. Rejects (422, `{missingIds, inactiveIds}`) if ANY id is unknown
+   * or inactive — the whole request fails together, nothing is silently dropped. */
+  async replaceMockExamQuestions(id: number, questionIds: number[]): Promise<MockExam> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 350);
+      return this.getMockExamById(id).then((e) => ({ ...e, questionIds, questionsCount: questionIds.length }));
+    }
+    return apiFetch<MockExam>(`/admin/mock-exams/${id}/questions`, {
+      method: "PUT",
+      body: JSON.stringify({ questionIds }),
+    });
+  },
+
   // Taxonomy Endpoints
   async getTaxonomy(): Promise<{ subjects: Subject[]; systems: BodySystem[] }> {
     if (CONFIG.USE_MOCK) {

@@ -44,6 +44,56 @@ export interface AnswerQuestionResponse {
   referenceText?: string;
 }
 
+/** `GET /qbank/analytics?range=` — see server/src/services/analyticsService.js. Default 'daily'; the
+ * server rejects (422) any value outside this union, so the client never sends anything else. */
+export type AnalyticsRange = "daily" | "weekly" | "monthly";
+
+export interface AnalyticsDailyTrendPoint {
+  /** `YYYY-MM-DD` for daily/weekly buckets, `YYYY-MM` for monthly — see analyticsService.js#buildSeries. */
+  date: string;
+  questions: number;
+  correct: number;
+  qbankSeconds?: number;
+}
+
+export interface AnalyticsOverall {
+  totalAttempted: number;
+  totalCorrect: number;
+  totalIncorrect: number;
+  totalSkipped: number;
+  overallPercent: number;
+  avgTimePerQuestionSeconds: number;
+}
+
+export interface AnalyticsNamedScore {
+  name: string;
+  score: number;
+}
+
+export interface AnalyticsGroupPerformance {
+  name: string;
+  total: number;
+  correct: number;
+  percent: number;
+  subjectId?: number;
+  systemId?: number;
+}
+
+/** `GET /qbank/analytics` response shape — see server/src/services/analyticsService.js#getAnalytics.
+ * `strengths`/`weaknesses`/`subjectPerformance`/`systemPerformance` are honestly EMPTY arrays (never
+ * fabricated placeholders) for a student with no graded QBank history yet; `dailyTrend` is always a full,
+ * zero-filled array covering the whole window (never empty) so a trend chart always has a real, gap-free
+ * x-axis to render — see docs/07_EXECUTION_PLAN.md 8.2's "empty-state for new user" AC. */
+export interface AnalyticsResponse {
+  overall: AnalyticsOverall;
+  strengths: AnalyticsNamedScore[];
+  weaknesses: AnalyticsNamedScore[];
+  subjectPerformance: AnalyticsGroupPerformance[];
+  systemPerformance: AnalyticsGroupPerformance[];
+  dailyTrend: AnalyticsDailyTrendPoint[];
+  range: AnalyticsRange;
+}
+
 export const qbankApi = {
   async getMeta(): Promise<QbankMetaResponse> {
     if (CONFIG.USE_MOCK) {
@@ -414,10 +464,11 @@ export const qbankApi = {
     });
   },
 
-  async getAnalytics() {
+  async getAnalytics(range: AnalyticsRange = "daily"): Promise<AnalyticsResponse> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 350);
       return {
+        range,
         overall: {
           totalAttempted: 420,
           totalCorrect: 321,
@@ -461,7 +512,7 @@ export const qbankApi = {
         ],
       };
     }
-    return apiFetch<any>("/qbank/analytics");
+    return apiFetch<AnalyticsResponse>(`/qbank/analytics?range=${range}`);
   },
 
   async getMockExams(): Promise<MockExam[]> {

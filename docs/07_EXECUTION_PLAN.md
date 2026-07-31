@@ -65,9 +65,9 @@
 - [x] 7.6 Wire exported Result + Review + History + Bookmarks pages (incl. retest-incorrect one-click) to real API + fix contract drift. **AC:** numbers match server response exactly.
 
 ## Phase 8 — Analytics + Mock exams
-- [ ] 8.1 Analytics endpoint (overall, subject/system arrays, strengths/weaknesses, series by range) + nightly user_daily_stats cron + question difficulty denormal cron. **AC:** aggregates match hand-computed seed fixture.
-- [ ] 8.2 Wire exported analytics UI (donut, bars, trend, range toggle) to real API + fix contract drift. **AC:** renders fixture correctly, empty-state for new user.
-- [ ] 8.3 Mock exams: admin CRUD+question picker API (backend, unchanged); wire exported admin picker UI + student list/start UI (reuses runner, mode=mock, pass/fail) to real API + fix contract drift. **AC:** pass mark logic test; attempt history stored.
+- [x] 8.1 Analytics endpoint (overall, subject/system arrays, strengths/weaknesses, series by range) + nightly user_daily_stats cron + question difficulty denormal cron. **AC:** aggregates match hand-computed seed fixture.
+- [x] 8.2 Wire exported analytics UI (donut, bars, trend, range toggle) to real API + fix contract drift. **AC:** renders fixture correctly, empty-state for new user. (Live-verified with real demo-student history.)
+- [x] 8.3 Mock exams: admin CRUD+question picker API (backend, unchanged); wire exported admin picker UI + student list/start UI (reuses runner, mode=mock, pass/fail) to real API + fix contract drift. **AC:** pass mark logic test; attempt history stored. (Pass-mark boundary tested at exactly the threshold; live-verified one real PASS and one real FAIL run end-to-end.)
 
 ## Phase 9 — Payments & enrollment (integrations-dev → security-auditor)
 - [ ] 9.1 Coupon service + quote endpoint (all error codes). **AC:** tests per code; percent vs fixed math; expiry windows.

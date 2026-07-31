@@ -16,6 +16,7 @@ import facultyRouter from './faculty.js';
 import faqsRouter from './faqs.js';
 import messagesRouter from './messages.js';
 import settingsRouter from './settings.js';
+import mockExamsRouter from './mockExams.js';
 
 const router = Router();
 
@@ -27,5 +28,6 @@ router.use(facultyRouter);
 router.use(faqsRouter);
 router.use(messagesRouter);
 router.use(settingsRouter);
+router.use(mockExamsRouter);
 
 export default router;

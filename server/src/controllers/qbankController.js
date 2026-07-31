@@ -8,6 +8,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { validateBody } from '../utils/validate.js';
 import { EXAM_CATEGORIES, QBANK_TEST_COUNT_MIN, QBANK_TEST_COUNT_MAX } from '../config/constants.js';
 import * as qbankService from '../services/qbankService.js';
+import * as analyticsService from '../services/analyticsService.js';
 
 // --- Schemas ----------------------------------------------------------------
 
@@ -46,6 +47,16 @@ const answerBodySchema = z.object({
 const historyQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+});
+
+// Invalid/unrecognized values (e.g. `?range=yearly`) are REJECTED (422
+// VALIDATION_ERROR) rather than silently falling back to the default — same
+// "reject, don't silently clamp/ignore" convention this router already
+// applies to `count` in createTestBodySchema. See
+// services/analyticsService.js + DECISIONS.md for the default ('daily') and
+// per-range window sizes.
+const analyticsQuerySchema = z.object({
+  range: z.enum(['daily', 'weekly', 'monthly']).optional().default('daily'),
 });
 
 // --- Helpers ------------------------------------------------------------------
@@ -123,5 +134,11 @@ export const addBookmark = asyncHandler(async (req, res) => {
 export const removeBookmark = asyncHandler(async (req, res) => {
   const { id } = validateBody(questionIdParamSchema, req.params);
   const data = await qbankService.removeQuestionBookmark(req.user.id, id);
+  ok(res, data);
+});
+
+export const getAnalytics = asyncHandler(async (req, res) => {
+  const { range } = validateBody(analyticsQuerySchema, req.query);
+  const data = await analyticsService.getAnalytics(req.user.id, range);
   ok(res, data);
 });

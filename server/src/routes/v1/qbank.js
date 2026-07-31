@@ -47,4 +47,9 @@ router.get('/questions/incorrect', ...requireStudent, qbankController.listIncorr
 router.post('/questions/:id/bookmark', ...requireStudent, qbankController.addBookmark);
 router.delete('/questions/:id/bookmark', ...requireStudent, qbankController.removeBookmark);
 
+// Phase 8.1 — totals/%s, subject+system arrays, strengths/weaknesses, and a
+// `?range=`-bucketed series from user_daily_stats. See
+// services/analyticsService.js for the full design + DECISIONS.md.
+router.get('/analytics', ...requireStudent, qbankController.getAnalytics);
+
 export default router;

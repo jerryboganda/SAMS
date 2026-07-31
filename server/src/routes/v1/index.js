@@ -8,6 +8,7 @@ import publicRouter from './public.js';
 import adminRouter from './admin/index.js';
 import studentRouter from './student/index.js';
 import qbankRouter from './qbank.js';
+import mockExamsRouter from './mockExams.js';
 
 const router = Router();
 
@@ -18,5 +19,8 @@ router.use('/admin', adminRouter);
 router.use('/student', studentRouter);
 // Top-level, NOT under /student — see routes/v1/qbank.js's header comment.
 router.use('/qbank', qbankRouter);
+// Top-level, NOT under /student or /qbank — see routes/v1/mockExams.js's
+// header comment (Phase 8.3).
+router.use('/mock-exams', mockExamsRouter);
 
 export default router;
