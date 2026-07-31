@@ -38,10 +38,10 @@
 - [x] 3.5 SEO meta (helmet) + server meta-inject for course detail; sitemap.xml + robots.txt routes. **AC:** curl course URL shows correct og:title. (Verified live; a client-side post-hydration title override for /courses/* is logged as a follow-up in DECISIONS.md, doesn't affect this AC.)
 
 ## Phase 4 — Content admin (backend-dev + frontend-dev)
-- [ ] 4.1 Admin CRUD API: courses(+publish), sections, lectures, reorder endpoints, image upload (multer, mime+5MB, random names). **AC:** tests incl. reorder integrity + upload rejects exe.
-- [ ] 4.2 Wire exported AdminLayout + guards + Table/Form patterns to real API + fix contract drift. **AC:** student hitting /admin → 403 page.
-- [ ] 4.3 Wire exported courses table + course form + Curriculum builder UI (sections/lectures, drag reorder, lecture modal) to real API + fix contract drift. **AC:** e2e-ish vitest of builder state; manual script updated.
-- [ ] 4.4 Wire exported Faculty, FAQs, contact-messages, settings pages (site+legal+bank tabs; masked secret fields) to real API + fix contract drift. **AC:** settings roundtrip; secrets never echoed.
+- [x] 4.1 Admin CRUD API: courses(+publish), sections, lectures, reorder endpoints, image upload (multer, mime+5MB, random names). **AC:** tests incl. reorder integrity + upload rejects exe. (Also built the admin Faculty/FAQs/contact-messages/Settings CRUD that 4.4 needs — see DECISIONS.md.)
+- [x] 4.2 Wire exported AdminLayout + guards + Table/Form patterns to real API + fix contract drift. **AC:** student hitting /admin → 403 page. (Guard already generic against real `user.role`; also fixed a cross-cutting session-bootstrap gap — see DECISIONS.md.)
+- [x] 4.3 Wire exported courses table + course form + Curriculum builder UI (sections/lectures, drag reorder, lecture modal) to real API + fix contract drift. **AC:** e2e-ish vitest of builder state; manual script updated. (Rewired from a nonexistent bulk-save endpoint to diff-based granular CRUD+reorder calls; live-verified in browser.)
+- [x] 4.4 Wire exported Faculty, FAQs, contact-messages, settings pages (site+legal+bank tabs; masked secret fields) to real API + fix contract drift. **AC:** settings roundtrip; secrets never echoed.
 
 ## Phase 5 — Secure video (integrations-dev → security-auditor)
 - [ ] 5.1 VideoProvider adapter: factory + `mock` driver (local sample HLS/mp4 in storage/dev-assets) + `bunny` driver (signed token URL builder, validateRef via API). **AC:** unit tests: token math matches Bunny docs example; mock returns playable URL.

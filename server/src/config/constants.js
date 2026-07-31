@@ -72,3 +72,24 @@ export const PUBLIC_SAMPLE_QUESTIONS_COUNT = 5;
 
 // POST /public/contact: 5 requests / hour / IP (docs/04_API_SPEC.md §8).
 export const CONTACT_MAX_PER_HOUR = 5;
+
+// --- Admin (docs/04_API_SPEC.md §7, Phase 4.1+4.4-merge — see DECISIONS.md) --
+
+// docs/10_SECURITY_CHECKLIST.md §G: "5 MB cap". Magic-byte-verified image
+// types only — server/src/utils/imageValidation.js sniffs the real content,
+// the client-declared mimetype/extension is never trusted alone.
+export const ADMIN_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+
+// The 5 aggregated "sections" GET/PUT /admin/settings groups the `settings`
+// table into, matching client/src/pages/admin/SettingsManagementPage.tsx's
+// tab structure exactly (site/payments/video/smtp) plus `legal`, which is
+// itself backed by the pre-existing granular legal.*/site.about keys below.
+export const ADMIN_SETTINGS_SECTIONS = ['site', 'payments', 'video', 'smtp', 'legal'];
+
+// Individual `settings` table keys (beyond the 5 sections above) the generic
+// bulk `PUT /admin/settings` may write directly — allowlisted so that route
+// can never be used to write an arbitrary key by name. These are the same
+// legal/about keys PUBLIC_PAGE_KEYS above reads (Phase 1 seeded, Phase 3.1
+// public route) — docs/04_API_SPEC.md §7 explicitly calls out legal pages as
+// editable "via this same admin endpoint".
+export const ADMIN_SETTINGS_RAW_KEYS = ['legal.privacy', 'legal.terms', 'legal.refund', 'site.about'];

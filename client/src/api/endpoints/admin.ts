@@ -1,5 +1,5 @@
 import { CONFIG } from "../../config";
-import { apiFetch, mockLatency } from "../client";
+import { apiFetch, apiUpload, mockLatency } from "../client";
 import {
   AdminDashboardKPIs,
   Announcement,
@@ -522,6 +522,26 @@ export const adminApi = {
     return apiFetch<{ success: boolean }>(`/admin/courses/${id}`, { method: "DELETE" });
   },
 
+  async publishCourse(id: number): Promise<Course> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      const course = MOCK_COURSES.find((c) => c.id === id);
+      if (course) course.isPublished = true;
+      return course || MOCK_COURSES[0];
+    }
+    return apiFetch<Course>(`/admin/courses/${id}/publish`, { method: "POST" });
+  },
+
+  async unpublishCourse(id: number): Promise<Course> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      const course = MOCK_COURSES.find((c) => c.id === id);
+      if (course) course.isPublished = false;
+      return course || MOCK_COURSES[0];
+    }
+    return apiFetch<Course>(`/admin/courses/${id}/unpublish`, { method: "POST" });
+  },
+
   async getCourseSections(courseId: number): Promise<CourseSection[]> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 200);
@@ -530,22 +550,170 @@ export const adminApi = {
     return apiFetch<CourseSection[]>(`/admin/courses/${courseId}/sections`);
   },
 
-  async saveCourseSections(courseId: number, sections: CourseSection[]): Promise<CourseSection[]> {
+  // --- Granular curriculum builder endpoints -------------------------------
+  // The real backend (server/src/routes/v1/admin/courses.js) has no bulk
+  // "save the whole curriculum" endpoint — only per-item CRUD plus two
+  // separate reorder endpoints. client/src/pages/admin/curriculumDiff.ts
+  // diffs the Curriculum Builder's local editor state against what it
+  // loaded and calls these one at a time. See DECISIONS.md (Phase 4.3).
+  async createSection(courseId: number, data: { title: string; sortOrder?: number }): Promise<CourseSection> {
     if (CONFIG.USE_MOCK) {
-      await mockLatency(null, 350);
-      // Replace existing sections for this courseId in mock
-      for (let i = MOCK_SECTIONS.length - 1; i >= 0; i--) {
-        if (MOCK_SECTIONS[i].courseId === Number(courseId)) {
-          MOCK_SECTIONS.splice(i, 1);
+      await mockLatency(null, 300);
+      const newSec: CourseSection = {
+        id: Date.now(),
+        courseId: Number(courseId),
+        title: data.title,
+        sortOrder: data.sortOrder ?? MOCK_SECTIONS.filter((s) => s.courseId === Number(courseId)).length,
+        lectures: [],
+      };
+      MOCK_SECTIONS.push(newSec);
+      return newSec;
+    }
+    return apiFetch<CourseSection>(`/admin/courses/${courseId}/sections`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateSection(id: number, data: Partial<Pick<CourseSection, "title" | "sortOrder">>): Promise<CourseSection> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      const sec = MOCK_SECTIONS.find((s) => s.id === id);
+      if (sec) Object.assign(sec, data);
+      return sec || MOCK_SECTIONS[0];
+    }
+    return apiFetch<CourseSection>(`/admin/sections/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  },
+
+  async deleteSection(id: number): Promise<{ success: boolean }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      const idx = MOCK_SECTIONS.findIndex((s) => s.id === id);
+      if (idx !== -1) MOCK_SECTIONS.splice(idx, 1);
+      return { success: true };
+    }
+    return apiFetch<{ success: boolean }>(`/admin/sections/${id}`, { method: "DELETE" });
+  },
+
+  async reorderSections(courseId: number, orderedIds: number[]): Promise<CourseSection[]> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      orderedIds.forEach((id, idx) => {
+        const s = MOCK_SECTIONS.find((sec) => sec.id === id);
+        if (s) s.sortOrder = idx;
+      });
+      return MOCK_SECTIONS.filter((s) => s.courseId === Number(courseId)).sort((a, b) => a.sortOrder - b.sortOrder);
+    }
+    return apiFetch<CourseSection[]>(`/admin/courses/${courseId}/sections/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ orderedIds }),
+    });
+  },
+
+  async createLecture(
+    sectionId: number,
+    data: {
+      title: string;
+      videoProvider?: Lecture["videoProvider"];
+      videoRef?: string | null;
+      durationSeconds?: number;
+      isFreePreview?: boolean;
+      isPublished?: boolean;
+      sortOrder?: number;
+    }
+  ): Promise<Lecture> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 300);
+      const sec = MOCK_SECTIONS.find((s) => s.id === sectionId);
+      const newLec: Lecture = {
+        id: Date.now(),
+        courseId: sec?.courseId || 0,
+        sectionId,
+        title: data.title,
+        videoProvider: data.videoProvider || "bunny",
+        videoRef: data.videoRef || "",
+        durationSeconds: data.durationSeconds || 0,
+        isFreePreview: data.isFreePreview || false,
+        isPublished: data.isPublished !== undefined ? data.isPublished : true,
+        sortOrder: data.sortOrder ?? sec?.lectures?.length ?? 0,
+      };
+      if (sec) {
+        sec.lectures = [...(sec.lectures || []), newLec];
+      }
+      return newLec;
+    }
+    return apiFetch<Lecture>(`/admin/sections/${sectionId}/lectures`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateLecture(
+    id: number,
+    data: Partial<
+      Pick<Lecture, "title" | "videoRef" | "videoProvider" | "durationSeconds" | "isFreePreview" | "isPublished" | "sortOrder">
+    >
+  ): Promise<Lecture> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      for (const sec of MOCK_SECTIONS) {
+        const lec = sec.lectures?.find((l) => l.id === id);
+        if (lec) {
+          Object.assign(lec, data);
+          return lec;
         }
       }
-      MOCK_SECTIONS.push(...sections);
-      return sections;
+      throw new Error("Lecture not found");
     }
-    return apiFetch<CourseSection[]>(`/admin/courses/${courseId}/sections`, {
-      method: "PUT",
-      body: JSON.stringify({ sections }),
+    return apiFetch<Lecture>(`/admin/lectures/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  },
+
+  async deleteLecture(id: number): Promise<{ success: boolean }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      for (const sec of MOCK_SECTIONS) {
+        if (sec.lectures) {
+          const idx = sec.lectures.findIndex((l) => l.id === id);
+          if (idx !== -1) {
+            sec.lectures.splice(idx, 1);
+            break;
+          }
+        }
+      }
+      return { success: true };
+    }
+    return apiFetch<{ success: boolean }>(`/admin/lectures/${id}`, { method: "DELETE" });
+  },
+
+  async reorderLectures(sectionId: number, orderedIds: number[]): Promise<Lecture[]> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      const sec = MOCK_SECTIONS.find((s) => s.id === sectionId);
+      if (sec?.lectures) {
+        orderedIds.forEach((id, idx) => {
+          const l = sec.lectures!.find((lec) => lec.id === id);
+          if (l) l.sortOrder = idx;
+        });
+        sec.lectures.sort((a, b) => a.sortOrder - b.sortOrder);
+        return sec.lectures;
+      }
+      return [];
+    }
+    return apiFetch<Lecture[]>(`/admin/sections/${sectionId}/lectures/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ orderedIds }),
     });
+  },
+
+  // --- Uploads ---------------------------------------------------------------
+  async uploadImage(file: File): Promise<{ url: string; mime: string; size: number }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 500);
+      return { url: URL.createObjectURL(file), mime: file.type, size: file.size };
+    }
+    const form = new FormData();
+    form.append("file", file);
+    return apiUpload<{ url: string; mime: string; size: number }>("/admin/uploads/image", form);
   },
 
   // Question Bank Endpoints

@@ -80,7 +80,6 @@ export const SettingsManagementPage: React.FC = () => {
   });
 
   const [testEmailAddress, setTestEmailAddress] = useState("doctor.test@samsacademy.com");
-  const [testingSmtp, setTestingSmtp] = useState(false);
 
   const loadSettings = async () => {
     setLoading(true);
@@ -113,19 +112,6 @@ export const SettingsManagementPage: React.FC = () => {
       console.error(err);
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleSendTestEmail = async () => {
-    if (!testEmailAddress) return;
-    setTestingSmtp(true);
-    try {
-      const res = await adminApi.sendTestEmail(testEmailAddress);
-      setToastMessage(res.message);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setTestingSmtp(false);
     }
   };
 
@@ -528,7 +514,11 @@ export const SettingsManagementPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Send Test Email Section */}
+          {/* Send Test Email Section — backend endpoint not built yet
+              (POST /admin/settings/smtp/test is out of scope for this
+              round, see DECISIONS.md), so this action is disabled with a
+              clear "not yet available" treatment rather than wired to a
+              404. */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 pt-4">
             <h4 className="text-xs font-bold text-[#0E2A47] flex items-center gap-1.5">
               <Send className="w-4 h-4 text-[#0FA3A3]" /> Send Test Email
@@ -539,12 +529,23 @@ export const SettingsManagementPage: React.FC = () => {
                 value={testEmailAddress}
                 onChange={(e) => setTestEmailAddress(e.target.value)}
                 placeholder="Enter recipient email address..."
-                className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-[#0FA3A3] focus:outline-none"
+                disabled
+                className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-[#0FA3A3] focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
               />
-              <Button variant="outline" size="sm" icon={<Send className="w-3.5 h-3.5" />} isLoading={testingSmtp} onClick={handleSendTestEmail}>
-                Send Test Email
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<Send className="w-3.5 h-3.5" />}
+                disabled
+                title="Live SMTP test-send isn't available yet in this deployment."
+              >
+                Send Test Email (Coming Soon)
               </Button>
             </div>
+            <p className="text-[10px] text-slate-400">
+              Live SMTP test-sending isn't wired up yet. Save your settings above, then verify delivery via a real
+              password-reset or verification email instead.
+            </p>
           </div>
 
           <div className="pt-2 flex justify-end">

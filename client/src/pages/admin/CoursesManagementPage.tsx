@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import {
   Plus,
   Edit,
@@ -13,11 +13,14 @@ import {
   Layers,
   Sparkles,
   Search,
+  UploadCloud,
 } from "lucide-react";
-import { Card, Button, Input, Table, Badge, Modal, Toast } from "../../components/ui";
+import { Card, Button, Input, Table, Badge, Modal, Toast, ConfirmDialog } from "../../components/ui";
 import { adminApi } from "../../api/endpoints/admin";
+import { ApiError } from "../../api/client";
 import { Course, CourseSection, Lecture } from "../../types";
 import { formatPKR } from "../../utils/formatters";
+import { buildCurriculumPlan, applyCurriculumPlan, nextTempId } from "./curriculumDiff";
 
 // Mock Bunny.net Video Library Assets
 const BUNNY_LIBRARY_VIDEOS = [
@@ -35,6 +38,18 @@ export const CoursesManagementPage: React.FC = () => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<"success" | "danger" | "warning" | "info">("success");
+
+  const showToast = (message: string, type: "success" | "danger" | "warning" | "info" = "success") => {
+    setToastType(type);
+    setToastMessage(message);
+  };
+
+  const describeError = (err: unknown, fallback: string): string => {
+    if (err instanceof ApiError) return err.message || fallback;
+    if (err instanceof Error) return err.message || fallback;
+    return fallback;
+  };
 
   // Course Add/Edit Form State
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
@@ -47,11 +62,23 @@ export const CoursesManagementPage: React.FC = () => {
   const [formDescription, setFormDescription] = useState("");
   const [formThumbnail, setFormThumbnail] = useState("https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80");
   const [formIsPublished, setFormIsPublished] = useState(true);
+  const [isSavingCourse, setIsSavingCourse] = useState(false);
+  const [isUploadingThumbnail, setIsUploadingThumbnail] = useState(false);
+  const thumbnailFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Course Delete Confirmation State
+  const [courseToDelete, setCourseToDelete] = useState<Course | null>(null);
+  const [isDeletingCourse, setIsDeletingCourse] = useState(false);
 
   // Curriculum Builder State
   const [isCurriculumModalOpen, setIsCurriculumModalOpen] = useState(false);
   const [curriculumCourse, setCurriculumCourse] = useState<Course | null>(null);
   const [sections, setSections] = useState<CourseSection[]>([]);
+  // Snapshot of `sections` exactly as loaded from the server — diffed
+  // against the (possibly heavily edited) `sections` state on save. See
+  // curriculumDiff.ts.
+  const [originalSections, setOriginalSections] = useState<CourseSection[]>([]);
+  const [isSavingCurriculum, setIsSavingCurriculum] = useState(false);
   const [newSectionTitle, setNewSectionTitle] = useState("");
 
   // Lecture Edit Modal State
@@ -102,7 +129,24 @@ export const CoursesManagementPage: React.FC = () => {
       setFormThumbnail("https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80");
       setFormIsPublished(true);
     }
+    setIsUploadingThumbnail(false);
     setIsCourseModalOpen(true);
+  };
+
+  const handleThumbnailFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingThumbnail(true);
+    try {
+      const uploaded = await adminApi.uploadImage(file);
+      setFormThumbnail(uploaded.url);
+      showToast("Thumbnail image uploaded successfully.", "success");
+    } catch (err) {
+      showToast(describeError(err, "Failed to upload thumbnail image."), "danger");
+    } finally {
+      setIsUploadingThumbnail(false);
+      e.target.value = "";
+    }
   };
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -122,6 +166,7 @@ export const CoursesManagementPage: React.FC = () => {
     e.preventDefault();
     if (!formTitle) return;
 
+    setIsSavingCourse(true);
     try {
       if (editingCourse) {
         const updated = await adminApi.updateCourse(editingCourse.id, {
@@ -135,7 +180,7 @@ export const CoursesManagementPage: React.FC = () => {
           isPublished: formIsPublished,
         });
         setCourses(courses.map((c) => (c.id === updated.id ? updated : c)));
-        setToastMessage(`Course "${updated.title}" updated successfully.`);
+        showToast(`Course "${updated.title}" updated successfully.`, "success");
       } else {
         const created = await adminApi.createCourse({
           title: formTitle,
@@ -148,41 +193,68 @@ export const CoursesManagementPage: React.FC = () => {
           isPublished: formIsPublished,
         });
         setCourses([created, ...courses]);
-        setToastMessage(`New course "${created.title}" created successfully!`);
+        showToast(`New course "${created.title}" created successfully!`, "success");
       }
       setIsCourseModalOpen(false);
     } catch (err) {
-      console.error(err);
+      showToast(describeError(err, "Failed to save course. Please check the form and try again."), "danger");
+    } finally {
+      setIsSavingCourse(false);
     }
   };
 
   const handleTogglePublished = async (course: Course) => {
     const newStatus = !course.isPublished;
     try {
-      await adminApi.updateCourse(course.id, { isPublished: newStatus });
-      setCourses(courses.map((c) => (c.id === course.id ? { ...c, isPublished: newStatus } : c)));
-      setToastMessage(`Course published status updated to ${newStatus ? "LIVE" : "DRAFT"}`);
+      const updated = newStatus ? await adminApi.publishCourse(course.id) : await adminApi.unpublishCourse(course.id);
+      setCourses(courses.map((c) => (c.id === course.id ? updated : c)));
+      showToast(`Course published status updated to ${newStatus ? "LIVE" : "DRAFT"}`, "success");
     } catch (err) {
-      console.error(err);
+      showToast(describeError(err, "Failed to update publish status."), "danger");
+    }
+  };
+
+  const handleDeleteCourse = async () => {
+    if (!courseToDelete) return;
+    setIsDeletingCourse(true);
+    try {
+      await adminApi.deleteCourse(courseToDelete.id);
+      setCourses(courses.filter((c) => c.id !== courseToDelete.id));
+      showToast(`Course "${courseToDelete.title}" deleted.`, "success");
+      setCourseToDelete(null);
+    } catch (err) {
+      // 409 CONFLICT (existing orders/enrollments) and any other failure
+      // both surface the backend's own friendly message here rather than a
+      // raw error — the confirm dialog stays open so the admin can read it
+      // (a page-level Toast would be hidden behind the modal backdrop, same
+      // convention as StudentsManagementPage's destructive-action confirms).
+      alert(describeError(err, "Failed to delete course."));
+    } finally {
+      setIsDeletingCourse(false);
     }
   };
 
   // Open Curriculum Manager
   const handleOpenCurriculum = async (course: Course) => {
     setCurriculumCourse(course);
+    setSections([]);
+    setOriginalSections([]);
     setIsCurriculumModalOpen(true);
     try {
       const secData = await adminApi.getCourseSections(course.id);
-      setSections(secData);
+      // Deep-clone so `sections` (the editable copy) and `originalSections`
+      // (the diff baseline) never alias the same nested lecture arrays.
+      setSections(JSON.parse(JSON.stringify(secData)));
+      setOriginalSections(JSON.parse(JSON.stringify(secData)));
     } catch (err) {
-      console.error(err);
+      showToast(describeError(err, "Failed to load curriculum for this course."), "danger");
     }
   };
 
   const handleAddSection = () => {
     if (!newSectionTitle.trim()) return;
     const newSec: CourseSection = {
-      id: Date.now(),
+      id: nextTempId(),
       courseId: curriculumCourse?.id || 1,
       title: newSectionTitle,
       sortOrder: sections.length + 1,
@@ -248,7 +320,7 @@ export const CoursesManagementPage: React.FC = () => {
           return { ...sec, lectures: updatedLecs };
         } else {
           const newLec: Lecture = {
-            id: Date.now(),
+            id: nextTempId(),
             courseId: curriculumCourse?.id || 1,
             sectionId: currentSectionId,
             title: lectureTitle,
@@ -298,14 +370,39 @@ export const CoursesManagementPage: React.FC = () => {
     );
   };
 
+  // The real backend has no bulk "save the whole curriculum" endpoint — only
+  // granular per-item CRUD + separate reorder calls (see curriculumDiff.ts
+  // and DECISIONS.md, Phase 4.3). Diff the editor's local state against
+  // what was loaded, then apply the resulting sequence of API calls.
   const handleSaveCurriculum = async () => {
     if (!curriculumCourse) return;
+    setIsSavingCurriculum(true);
     try {
-      await adminApi.saveCourseSections(curriculumCourse.id, sections);
-      setToastMessage(`Curriculum structure & video associations saved for "${curriculumCourse.title}"!`);
+      const plan = buildCurriculumPlan(originalSections, sections);
+      const persisted = await applyCurriculumPlan(curriculumCourse.id, plan, adminApi);
+      setSections(persisted);
+      setOriginalSections(JSON.parse(JSON.stringify(persisted)));
+      showToast(`Curriculum structure & video associations saved for "${curriculumCourse.title}"!`, "success");
       setIsCurriculumModalOpen(false);
+      // Refresh the course list so sectionsCount/lecturesCount/duration stay accurate.
+      loadCourses();
     } catch (err) {
-      console.error(err);
+      // Some operations in the plan may have already landed server-side
+      // before this one failed — re-sync both the editor and the diff
+      // baseline against the server's real current state so the admin
+      // isn't left editing a tree that's silently out of sync, and can
+      // retry just the remaining changes instead of re-doing everything.
+      try {
+        const latest = await adminApi.getCourseSections(curriculumCourse.id);
+        setSections(latest);
+        setOriginalSections(JSON.parse(JSON.stringify(latest)));
+      } catch {
+        // If even the re-sync fails, leave the editor state as-is.
+      }
+      const baseMessage = describeError(err, "Failed to save curriculum.");
+      showToast(`${baseMessage} Some changes may have partially applied — the list above has been refreshed with the current saved state; please review and retry.`, "danger");
+    } finally {
+      setIsSavingCurriculum(false);
     }
   };
 
@@ -322,7 +419,7 @@ export const CoursesManagementPage: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-12">
-      {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
+      {toastMessage && <Toast message={toastMessage} type={toastType} onClose={() => setToastMessage(null)} />}
 
       {/* Header Bar */}
       <div className="border-b border-slate-200 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -403,12 +500,21 @@ export const CoursesManagementPage: React.FC = () => {
                   >
                     Edit
                   </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    icon={<Trash2 className="w-3.5 h-3.5 text-rose-600" />}
+                    onClick={() => setCourseToDelete(row)}
+                  >
+                    Delete
+                  </Button>
                 </div>
               ),
             },
           ]}
           data={filteredCourses}
           isLoading={isLoading}
+          emptyText="No courses yet — click “Create New Course” to add your first medical course package."
         />
       </Card>
 
@@ -483,12 +589,44 @@ export const CoursesManagementPage: React.FC = () => {
             />
           </div>
 
-          <Input
-            label="Thumbnail Image URL"
-            value={formThumbnail}
-            onChange={(e) => setFormThumbnail(e.target.value)}
-            placeholder="https://..."
-          />
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Thumbnail Image</label>
+            <div className="flex items-start gap-3">
+              {formThumbnail && (
+                <img
+                  src={formThumbnail}
+                  alt="Thumbnail preview"
+                  className="w-20 h-16 object-cover rounded-lg border border-slate-200 shrink-0 bg-slate-100"
+                />
+              )}
+              <div className="flex-1 space-y-2">
+                <Input
+                  value={formThumbnail}
+                  onChange={(e) => setFormThumbnail(e.target.value)}
+                  placeholder="https://... (or upload a file below)"
+                  aria-label="Thumbnail Image URL"
+                />
+                <input
+                  ref={thumbnailFileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  onChange={handleThumbnailFileChange}
+                  className="hidden"
+                  aria-label="Upload thumbnail image file"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  icon={<UploadCloud className="w-3.5 h-3.5" />}
+                  isLoading={isUploadingThumbnail}
+                  onClick={() => thumbnailFileInputRef.current?.click()}
+                >
+                  {isUploadingThumbnail ? "Uploading..." : "Upload Image File"}
+                </Button>
+              </div>
+            </div>
+          </div>
 
           <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
             <div>
@@ -506,7 +644,7 @@ export const CoursesManagementPage: React.FC = () => {
             </label>
           </div>
 
-          <Button type="submit" variant="teal" fullWidth>
+          <Button type="submit" variant="teal" fullWidth isLoading={isSavingCourse}>
             {editingCourse ? "Save Changes" : "Create Course Package"}
           </Button>
         </form>
@@ -638,8 +776,8 @@ export const CoursesManagementPage: React.FC = () => {
             ))}
           </div>
 
-          <Button variant="teal" fullWidth onClick={handleSaveCurriculum}>
-            Save Curriculum Sequence
+          <Button variant="teal" fullWidth onClick={handleSaveCurriculum} isLoading={isSavingCurriculum}>
+            {isSavingCurriculum ? "Saving Curriculum..." : "Save Curriculum Sequence"}
           </Button>
         </div>
       </Modal>
@@ -720,6 +858,23 @@ export const CoursesManagementPage: React.FC = () => {
           </Button>
         </div>
       </Modal>
+
+      {/* Delete Course Confirmation */}
+      <ConfirmDialog
+        isOpen={!!courseToDelete}
+        title="Delete Course Package"
+        message={
+          courseToDelete
+            ? `Are you sure you want to permanently delete "${courseToDelete.title}"? This cannot be undone. Courses with existing student orders or enrollments cannot be deleted — unpublish them instead.`
+            : ""
+        }
+        confirmLabel="Delete Course"
+        cancelLabel="Cancel"
+        variant="danger"
+        isLoading={isDeletingCourse}
+        onConfirm={handleDeleteCourse}
+        onCancel={() => setCourseToDelete(null)}
+      />
     </div>
   );
 };

@@ -37,6 +37,15 @@ app.use(globalLimiter);
 // --- API routes -----------------------------------------------------------
 app.use('/api/v1', v1Router);
 
+// --- Uploaded assets (course thumbnails, question images, ...) -----------
+// Served from storage/uploads/ under randomized filenames written by
+// POST /admin/uploads/image (server/src/services/adminUploadService.js).
+// `X-Content-Type-Options: nosniff` is already set globally by helmet()
+// above (docs/10_SECURITY_CHECKLIST.md §G); express.static sets the
+// Content-Type from the (sniffed-type-matched) file extension we control.
+// The SPA fallback regex below already excludes `/uploads/*` from its catch-all.
+app.use('/uploads', express.static(path.join(REPO_ROOT, 'storage', 'uploads')));
+
 // --- SEO: robots.txt + sitemap.xml (docs/07_EXECUTION_PLAN.md 3.5) --------
 // Always available regardless of client/dist presence — these are
 // server-generated, not part of the SPA build.

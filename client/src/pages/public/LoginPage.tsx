@@ -26,7 +26,7 @@ import { resolveLoginErrorScreen } from "./loginErrorScreen";
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, logout, clearErrors } = useAuth();
+  const { login, logout, clearErrors, completeExternalLogin, sessionExpiredMessage } = useAuth();
 
   // Primary Login Form State
   const [email, setEmail] = useState(CONFIG.USE_MOCK ? "student@samsacademy.com" : "");
@@ -175,7 +175,13 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // Suspicious Reverify Submit
+  // Suspicious Reverify Submit — authApi.reverifyLogin() (like authApi.login())
+  // completes the session server-side via httpOnly cookies, but doesn't
+  // touch client-side auth state on its own. Without committing the
+  // returned user into the auth store here, `useAuth().isAuthenticated`
+  // stays false after a real (non-mock) reverify success, and
+  // ProtectedRoute immediately bounces the now-actually-logged-in admin/
+  // student straight back to /login. See DECISIONS.md (Phase 4.2).
   const handleReverifySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -183,6 +189,7 @@ export const LoginPage: React.FC = () => {
     try {
       const res = await authApi.reverifyLogin(email, reverifyCode || "123456");
       if (res.user) {
+        completeExternalLogin(res.user, res.token);
         routeAfterLogin(res.user.role);
       }
     } catch (err: any) {
@@ -486,6 +493,16 @@ export const LoginPage: React.FC = () => {
       subtitle="Sign in to access NRE Step 1 courses, QBank, & mock exams."
     >
       <div className="space-y-4">
+        {/* Session-Expired Notice (redirected here after a revoked/expired
+            mid-session token — see authStore.tsx's AUTH_SESSION_EXPIRED_EVENT
+            handling). Not an error: cleared on the next login attempt. */}
+        {sessionExpiredMessage && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+            <span>{sessionExpiredMessage}</span>
+          </div>
+        )}
+
         {/* Quick Demo Credentials Presets Bar */}
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
           <div className="flex items-center justify-between text-[10px] font-bold text-[#0E2A47] uppercase tracking-wider">

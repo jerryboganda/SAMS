@@ -95,10 +95,17 @@ export const authApi = {
       throw new ApiError("Invalid email or password. Please verify credentials.", "INVALID_CREDENTIALS", 401);
     }
 
-    return apiFetch<LoginResponse>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(req),
-    });
+    // Bad credentials / TWOFA_REQUIRED / REVERIFY_REQUIRED are all expected
+    // 401s from an endpoint that never had a session to begin with — must
+    // not trip the global "your session was revoked" handler in client.ts.
+    return apiFetch<LoginResponse>(
+      "/auth/login",
+      {
+        method: "POST",
+        body: JSON.stringify(req),
+      },
+      { skipAuthRedirect: true }
+    );
   },
 
   /**
@@ -131,10 +138,14 @@ export const authApi = {
       }
       return { message: "Registration successful! Please check your email for the verification link." };
     }
-    return apiFetch<{ message: string }>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    return apiFetch<{ message: string }>(
+      "/auth/register",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+      { skipAuthRedirect: true }
+    );
   },
 
   async resendVerification(email: string): Promise<{ message: string }> {
@@ -142,13 +153,25 @@ export const authApi = {
       await mockLatency(null, 400);
       return { message: "If a pending account exists for this email, a new verification link has been sent." };
     }
-    return apiFetch<{ message: string }>("/auth/resend-verification", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    });
+    return apiFetch<{ message: string }>(
+      "/auth/resend-verification",
+      {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      },
+      { skipAuthRedirect: true }
+    );
   },
 
-  async getCurrentUser(): Promise<User> {
+  /**
+   * `opts.skipAuthRedirect` should be `true` when called from the auth
+   * bootstrap check on app mount (client/src/stores/authStore.tsx) — a 401
+   * there just means "this visitor was never logged in," which is a normal
+   * outcome, not a revoked session. Leave it false/omitted for any other
+   * call site (e.g. a future "refresh my profile" action while already
+   * authenticated), where a 401 IS a real session-ended signal.
+   */
+  async getCurrentUser(opts?: { skipAuthRedirect?: boolean }): Promise<User> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 250);
       const savedUserJson = localStorage.getItem("sams_mock_auth_user");
@@ -157,7 +180,7 @@ export const authApi = {
       }
       return MOCK_USERS[0];
     }
-    return apiFetch<User>("/auth/me");
+    return apiFetch<User>("/auth/me", undefined, { skipAuthRedirect: opts?.skipAuthRedirect ?? false });
   },
 
   async logout(): Promise<{ success: boolean }> {
@@ -167,7 +190,10 @@ export const authApi = {
       localStorage.removeItem("sams_mock_auth_token");
       return { success: true };
     }
-    return apiFetch<{ success: boolean }>("/auth/logout", { method: "POST" });
+    // An already-invalid session 401ing on its own logout call is expected
+    // (nothing to revoke) — don't let it re-trigger the global handler while
+    // authStore's own logout() is already tearing down local state.
+    return apiFetch<{ success: boolean }>("/auth/logout", { method: "POST" }, { skipAuthRedirect: true });
   },
 
   async getDevices(): Promise<UserDevice[]> {
@@ -222,10 +248,14 @@ export const authApi = {
         message: "If an account exists for " + email + ", password reset instructions have been sent.",
       };
     }
-    return apiFetch<{ message: string }>("/auth/forgot-password", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    });
+    return apiFetch<{ message: string }>(
+      "/auth/forgot-password",
+      {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      },
+      { skipAuthRedirect: true }
+    );
   },
 
   async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
@@ -238,10 +268,14 @@ export const authApi = {
         message: "Password reset successful. You may now log in with your new password.",
       };
     }
-    return apiFetch<{ message: string }>("/auth/reset-password", {
-      method: "POST",
-      body: JSON.stringify({ token, newPassword }),
-    });
+    return apiFetch<{ message: string }>(
+      "/auth/reset-password",
+      {
+        method: "POST",
+        body: JSON.stringify({ token, newPassword }),
+      },
+      { skipAuthRedirect: true }
+    );
   },
 
   async verifyEmailToken(token: string): Promise<{ success: boolean; message: string }> {
@@ -255,10 +289,14 @@ export const authApi = {
         message: "Email address verified successfully!",
       };
     }
-    return apiFetch<{ success: boolean; message: string }>("/auth/verify-email", {
-      method: "POST",
-      body: JSON.stringify({ token }),
-    });
+    return apiFetch<{ success: boolean; message: string }>(
+      "/auth/verify-email",
+      {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      },
+      { skipAuthRedirect: true }
+    );
   },
 
   async reverifyLogin(email: string, code: string): Promise<LoginResponse> {
@@ -274,9 +312,13 @@ export const authApi = {
         deviceToken: "mock-device-reverified",
       };
     }
-    return apiFetch<LoginResponse>("/auth/reverify", {
-      method: "POST",
-      body: JSON.stringify({ email, code }),
-    });
+    return apiFetch<LoginResponse>(
+      "/auth/reverify",
+      {
+        method: "POST",
+        body: JSON.stringify({ email, code }),
+      },
+      { skipAuthRedirect: true }
+    );
   },
 };
