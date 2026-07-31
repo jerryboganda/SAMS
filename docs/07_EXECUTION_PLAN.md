@@ -44,12 +44,12 @@
 - [x] 4.4 Wire exported Faculty, FAQs, contact-messages, settings pages (site+legal+bank tabs; masked secret fields) to real API + fix contract drift. **AC:** settings roundtrip; secrets never echoed.
 
 ## Phase 5 — Secure video (integrations-dev → security-auditor)
-- [ ] 5.1 VideoProvider adapter: factory + `mock` driver (local sample HLS/mp4 in storage/dev-assets) + `bunny` driver (signed token URL builder, validateRef via API). **AC:** unit tests: token math matches Bunny docs example; mock returns playable URL.
-- [ ] 5.2 `/student/lectures/:id/play`: enrollment+expiry+device checks, playback_session create/steal, watermark payload, resumeAt; free-preview public path. **AC:** tests: not-enrolled 403, expired 403, preview OK, second stream steals first.
-- [ ] 5.3 Heartbeat endpoint: progress upsert, stream lock renew, 409 on stolen; complete endpoint; study-seconds accumulation. **AC:** tests incl. stale-session takeover.
-- [ ] 5.4 Wire exported SecurePlayer component (hls.js, moving watermark, heartbeat loop, takeover modal, resume, token refresh, deterrents) to real API + fix contract drift (align `/play` response fields to `PlaybackConfig`, see DECISIONS.md). **AC:** vitest logic (watermark scheduler, heartbeat backoff); manual script with mock video.
-- [ ] 5.5 Wire exported course player page (curriculum drawer, ✓/🔖, autoplay next) + preview route to real API + fix contract drift. **AC:** progress % updates after simulated watch.
-- [ ] 5.6 🔒 security-auditor: video abuse cases (direct URL reuse after expiry, other-user lecture IDOR, watermark payload source). **AC:** zero Critical/High.
+- [x] 5.1 VideoProvider adapter: factory + `mock` driver (local sample HLS/mp4 in storage/dev-assets) + `bunny` driver (signed token URL builder, validateRef via API). **AC:** unit tests: token math matches Bunny docs example; mock returns playable URL. (Bunny's own doc example is internally inconsistent — self-computed deterministic vectors used instead; see DECISIONS.md.)
+- [x] 5.2 `/student/lectures/:id/play`: enrollment+expiry+device checks, playback_session create/steal, watermark payload, resumeAt; free-preview public path. **AC:** tests: not-enrolled 403, expired 403, preview OK, second stream steals first.
+- [x] 5.3 Heartbeat endpoint: progress upsert, stream lock renew, 409 on stolen; complete endpoint; study-seconds accumulation. **AC:** tests incl. stale-session takeover.
+- [x] 5.4 Wire exported SecurePlayer component (hls.js, moving watermark, heartbeat loop, takeover modal, resume, token refresh, deterrents) to real API + fix contract drift (align `/play` response fields to `PlaybackConfig`, see DECISIONS.md). **AC:** vitest logic (watermark scheduler, heartbeat backoff); manual script with mock video. (Live-verified: real video playback, real heartbeats persisting to the DB, real completion.)
+- [x] 5.5 Wire exported course player page (curriculum drawer, ✓/🔖, autoplay next) + preview route to real API + fix contract drift. **AC:** progress % updates after simulated watch.
+- [x] 5.6 🔒 security-auditor: video abuse cases (direct URL reuse after expiry, other-user lecture IDOR, watermark payload source). **AC:** zero Critical/High. (Found + fixed 1 HIGH: the concurrent-stream lock had a live-reproduced race condition allowing multiple simultaneous sessions; +1 Medium: heartbeat had no rate limit/elapsed-time cross-check. Both fixed and re-verified — see DECISIONS.md.)
 
 ## Phase 6 — Student dashboard (backend-dev + frontend-dev)
 - [ ] 6.1 Dashboard aggregate endpoint (progress %, remaining, continue-watching, study hours 7d/total, expiring, announcements, unread count). **AC:** single query-count budget (≤8 queries), test on seed data.

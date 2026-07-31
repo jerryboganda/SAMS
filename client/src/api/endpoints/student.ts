@@ -54,12 +54,23 @@ export const studentApi = {
     return apiFetch<any>(`/student/courses/${courseId}`);
   },
 
-  async toggleLectureBookmark(lectureId: number) {
+  /**
+   * `isCurrentlyBookmarked` picks the HTTP verb — the real backend exposes
+   * separate idempotent `POST` (add) / `DELETE` (remove) endpoints
+   * (server/src/controllers/studentVideoController.js), not a single
+   * "flip" call. See DECISIONS.md 2026-07-31 (Phase 5.4-5.5): the
+   * previous version of this function always called POST regardless of
+   * current state, which meant a bookmarked lecture could never actually
+   * be un-bookmarked through this API surface.
+   */
+  async toggleLectureBookmark(lectureId: number, isCurrentlyBookmarked: boolean) {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 200);
-      return { isBookmarked: true };
+      return { isBookmarked: !isCurrentlyBookmarked };
     }
-    return apiFetch<{ isBookmarked: boolean }>(`/student/lectures/${lectureId}/bookmark`, { method: "POST" });
+    return apiFetch<{ isBookmarked: boolean }>(`/student/lectures/${lectureId}/bookmark`, {
+      method: isCurrentlyBookmarked ? "DELETE" : "POST",
+    });
   },
 
   async getBookmarkedLectures(): Promise<Lecture[]> {

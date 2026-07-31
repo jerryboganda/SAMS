@@ -93,3 +93,29 @@ export const ADMIN_SETTINGS_SECTIONS = ['site', 'payments', 'video', 'smtp', 'le
 // public route) — docs/04_API_SPEC.md §7 explicitly calls out legal pages as
 // editable "via this same admin endpoint".
 export const ADMIN_SETTINGS_RAW_KEYS = ['legal.privacy', 'legal.terms', 'legal.refund', 'site.about'];
+
+// --- Student — secure video playback (docs/04_API_SPEC.md §3, §8;
+// docs/02_ARCHITECTURE.md §4 "Concurrent stream lock" — see DECISIONS.md
+// Phase 5.2/5.3 entry for the reasoning behind each value) --------------
+
+// A `playback_sessions` row with `ended_at IS NULL` is only genuinely
+// "active" while its last heartbeat is this recent; older than this it's
+// dead (no reachable player is holding it) and safe to silently supersede.
+// Not currently branched on by the session-steal logic itself (any existing
+// ended_at-IS-NULL row is unconditionally stolen on a new /play, whether
+// stale or fresh — see videoService.js), but documents the policy value and
+// is available for future "active viewers now" reporting.
+export const PLAYBACK_STALE_HEARTBEAT_SECONDS = 90;
+
+// Heartbeat is sent every ~15-30s by the player (client/src/components/
+// player/SecurePlayer.tsx uses 15s). `delta` (seconds watched since the last
+// heartbeat) is client-reported and only ever treated as advisory — clamped
+// into this range server-side so a malicious client can't inflate
+// watched-time/study-stats in a single call.
+export const HEARTBEAT_DELTA_MIN_SECONDS = 0;
+export const HEARTBEAT_DELTA_MAX_SECONDS = 60;
+
+// A lecture is auto-marked complete once the reported position reaches this
+// fraction of its duration (video credits/outro are typically the last few
+// percent — 95% avoids requiring a frame-perfect "watched to the very end").
+export const LECTURE_COMPLETE_THRESHOLD_RATIO = 0.95;

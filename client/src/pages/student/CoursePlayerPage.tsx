@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -9,135 +9,299 @@ import {
   Play,
   PanelRightClose,
   PanelRightOpen,
-  Sparkles,
-  Lock,
   FileQuestion,
-  Clock,
   BookOpen,
+  AlertTriangle,
 } from "lucide-react";
-import { Card, Button, Badge, ToastSystem } from "../../components/ui";
+import { Card, Button, Badge, ToastSystem, EmptyState, Skeleton } from "../../components/ui";
 import { SecurePlayer } from "../../components/player/SecurePlayer";
-import { MOCK_SECTIONS } from "../../mock-data";
-import { Lecture, CourseSection } from "../../types";
+import { coursesApi } from "../../api/endpoints/courses";
+import { studentApi } from "../../api/endpoints/student";
+import { Course, CourseSection, Lecture } from "../../types";
+
+type LoadState = "loading" | "error" | "empty" | "data";
 
 export const CoursePlayerPage: React.FC = () => {
   const { id, lectureId } = useParams<{ id?: string; lectureId?: string }>();
   const navigate = useNavigate();
 
-  // Determine active lecture ID
-  const initialLectureId = Number(lectureId) || Number(id) || 1001;
-  const [activeLectureId, setActiveLectureId] = useState<number>(initialLectureId);
+  const routeCourseId = id ? Number(id) : undefined;
+  const routeLectureId = lectureId ? Number(lectureId) : undefined;
 
   // Curriculum & Sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [autoAdvance, setAutoAdvance] = useState(true);
 
-  // Track completed & bookmarked lectures (persisted in localStorage)
-  const [completedLectureIds, setCompletedLectureIds] = useState<number[]>(() => {
-    try {
-      const saved = localStorage.getItem("sams_completed_lectures");
-      return saved ? JSON.parse(saved) : [1001];
-    } catch {
-      return [1001];
-    }
-  });
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadErrorMsg, setLoadErrorMsg] = useState("");
+  const [course, setCourse] = useState<Course | null>(null);
+  const [sections, setSections] = useState<CourseSection[]>([]);
+  const [activeLectureId, setActiveLectureId] = useState<number | null>(null);
+  const sectionsRef = useRef<CourseSection[]>([]);
 
-  const [bookmarkedLectureIds, setBookmarkedLectureIds] = useState<number[]>(() => {
-    try {
-      const saved = localStorage.getItem("sams_bookmarked_lectures");
-      return saved ? JSON.parse(saved) : [1002];
-    } catch {
-      return [1002];
-    }
-  });
+  // Real per-lecture bookmark/completion state. There is no bulk
+  // "curriculum + per-lecture progress" endpoint yet — `GET
+  // /student/courses/:courseId` is docs/04_API_SPEC.md §3's planned source
+  // for that, but it's Phase 6 (docs/07_EXECUTION_PLAN.md), not built. This
+  // page instead seeds from the two real signals Phase 5 *does* expose
+  // (`GET /student/bookmarks/lectures`, which also reports `isCompleted`
+  // for whichever lectures happen to be bookmarked) and otherwise fills in
+  // live as the viewer actually plays lectures this session (SecurePlayer's
+  // `onComplete` callback, itself driven by the real `/complete` and
+  // `/play`+resume-ratio signals — see playerLogic.ts's
+  // `inferAlreadyCompletedFromResume`). See DECISIONS.md 2026-07-31.
+  const [bookmarkedLectureIds, setBookmarkedLectureIds] = useState<Set<number>>(new Set());
+  const [completedLectureIds, setCompletedLectureIds] = useState<Set<number>>(new Set());
+  const [bookmarkPending, setBookmarkPending] = useState(false);
 
   // Toasts
   const [toastMessage, setToastMessage] = useState("");
+  const [toastType, setToastType] = useState<"success" | "danger">("success");
 
   useEffect(() => {
-    if (lectureId) {
-      setActiveLectureId(Number(lectureId));
-    } else if (id && Number(id) < 1000) {
-      const courseLectures = MOCK_SECTIONS.filter((s) => s.courseId === Number(id)).flatMap((s) => s.lectures || []);
-      if (courseLectures.length > 0) {
-        setActiveLectureId(courseLectures[0].id);
+    sectionsRef.current = sections;
+  }, [sections]);
+
+  // Seed real bookmark + (partial) completion state once per mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const bookmarks = await studentApi.getBookmarkedLectures();
+        if (cancelled) return;
+        setBookmarkedLectureIds(new Set(bookmarks.map((l) => l.id)));
+        setCompletedLectureIds((prev) => {
+          const next = new Set(prev);
+          bookmarks.forEach((l) => {
+            if (l.isCompleted) next.add(l.id);
+          });
+          return next;
+        });
+      } catch (err) {
+        // Non-fatal — bookmark icons just default to "not bookmarked" until toggled.
+        console.error("Failed to load bookmarked lectures:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Resolve the real curriculum (sections + lectures, in real DB order) for
+  // whichever course owns the requested lecture/course id, via the public
+  // catalog (server/src/services/publicService.js#getCourseBySlug — already
+  // real, already published data; access to the actual signed video URL is
+  // separately, correctly gated by SecurePlayer's own `/play` call, which
+  // enforces enrollment). Fast path: if the lecture we're navigating to
+  // (prev/next/sidebar click) is already in the curriculum we loaded, just
+  // switch the active lecture — no refetch.
+  useEffect(() => {
+    if (routeLectureId) {
+      const alreadyLoaded = sectionsRef.current.some((s) => (s.lectures || []).some((l) => l.id === routeLectureId));
+      if (alreadyLoaded) {
+        setActiveLectureId(routeLectureId);
+        return;
       }
     }
-  }, [id, lectureId]);
 
-  // All flat lectures list for prev/next calculations
-  const allLectures: Lecture[] = MOCK_SECTIONS.flatMap((s) => s.lectures || []);
+    let cancelled = false;
+    (async () => {
+      setLoadState("loading");
+      setLoadErrorMsg("");
+      try {
+        const allCourses = await coursesApi.getCourses();
+        if (allCourses.length === 0) {
+          throw new Error("No courses are currently available.");
+        }
+
+        const knownCourse = routeCourseId ? allCourses.find((c) => c.id === routeCourseId) : undefined;
+        const candidates = knownCourse ? [knownCourse, ...allCourses.filter((c) => c.id !== knownCourse.id)] : allCourses;
+
+        let resolved: { course: Course; sections: CourseSection[] } | null = null;
+        for (const candidate of candidates) {
+          try {
+            const detail = await coursesApi.getCourseWithSections(candidate.slug);
+            const hasTargetLecture =
+              !routeLectureId || detail.sections.some((s) => (s.lectures || []).some((l) => l.id === routeLectureId));
+            if (candidate.id === routeCourseId || hasTargetLecture) {
+              resolved = detail;
+              break;
+            }
+          } catch {
+            // Unpublished/broken course — skip and try the next candidate.
+          }
+        }
+
+        if (cancelled) return;
+
+        if (!resolved) {
+          setLoadState("error");
+          setLoadErrorMsg(
+            routeLectureId
+              ? "We couldn't find this lecture in any course curriculum."
+              : "We couldn't load this course's curriculum."
+          );
+          return;
+        }
+
+        const allLecturesFlat = resolved.sections.flatMap((s) => s.lectures || []);
+        setCourse(resolved.course);
+        setSections(resolved.sections);
+
+        if (allLecturesFlat.length === 0) {
+          setLoadState("empty");
+          return;
+        }
+
+        const target = routeLectureId ? allLecturesFlat.find((l) => l.id === routeLectureId) : undefined;
+        const resolvedActive = target || allLecturesFlat[0];
+        setActiveLectureId(resolvedActive.id);
+        setLoadState("data");
+      } catch (err: any) {
+        if (!cancelled) {
+          setLoadState("error");
+          setLoadErrorMsg(err.message || "Failed to load course curriculum.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeCourseId, routeLectureId]);
+
+  const allLectures: Lecture[] = sections.flatMap((s) => s.lectures || []);
   const currentIndex = allLectures.findIndex((l) => l.id === activeLectureId);
-
-  const activeLecture = allLectures[currentIndex] || allLectures[0];
+  const activeLecture = currentIndex >= 0 ? allLectures[currentIndex] : null;
   const prevLecture = currentIndex > 0 ? allLectures[currentIndex - 1] : null;
-  const nextLecture = currentIndex < allLectures.length - 1 ? allLectures[currentIndex + 1] : null;
+  const nextLecture = currentIndex >= 0 && currentIndex < allLectures.length - 1 ? allLectures[currentIndex + 1] : null;
 
-  // Handle >=90% Completion Trigger
+  const showToast = (message: string, type: "success" | "danger" = "success") => {
+    setToastType(type);
+    setToastMessage(message);
+  };
+
+  // Handle >=90% Completion Trigger — called by SecurePlayer once the real
+  // POST /complete call (or the resume-ratio inference on load) confirms it.
   const handleLectureComplete = () => {
-    if (!completedLectureIds.includes(activeLectureId)) {
-      const updated = [...completedLectureIds, activeLectureId];
-      setCompletedLectureIds(updated);
-      localStorage.setItem("sams_completed_lectures", JSON.stringify(updated));
-      setToastMessage(`🎉 Lecture '${activeLecture.title}' marked as completed!`);
+    if (!activeLectureId) return;
+    setCompletedLectureIds((prev) => {
+      if (prev.has(activeLectureId)) return prev;
+      const next = new Set(prev);
+      next.add(activeLectureId);
+      return next;
+    });
+    if (activeLecture) {
+      showToast(`Lecture '${activeLecture.title}' marked as completed!`);
     }
   };
 
-  // Handle Video Ended (Auto Advance if Enabled)
+  // Handle Video Ended (Auto Advance through the real curriculum order)
   const handleLectureEnded = () => {
     handleLectureComplete();
     if (autoAdvance && nextLecture) {
-      setToastMessage(`Auto-advancing to '${nextLecture.title}'...`);
+      showToast(`Auto-advancing to '${nextLecture.title}'...`);
       setTimeout(() => {
         navigate(`/app/learn/${nextLecture.id}`);
       }, 1500);
     }
   };
 
-  // Toggle Bookmark
-  const handleBookmarkToggle = () => {
-    if (bookmarkedLectureIds.includes(activeLectureId)) {
-      const updated = bookmarkedLectureIds.filter((id) => id !== activeLectureId);
-      setBookmarkedLectureIds(updated);
-      localStorage.setItem("sams_bookmarked_lectures", JSON.stringify(updated));
-      setToastMessage("Bookmark removed");
-    } else {
-      const updated = [...bookmarkedLectureIds, activeLectureId];
-      setBookmarkedLectureIds(updated);
-      localStorage.setItem("sams_bookmarked_lectures", JSON.stringify(updated));
-      setToastMessage("Lecture added to bookmarks!");
+  // Toggle Bookmark against the real POST/DELETE endpoints.
+  const handleBookmarkToggle = async () => {
+    if (!activeLectureId || bookmarkPending) return;
+    const isCurrentlyBookmarked = bookmarkedLectureIds.has(activeLectureId);
+    setBookmarkPending(true);
+    try {
+      const result = await studentApi.toggleLectureBookmark(activeLectureId, isCurrentlyBookmarked);
+      setBookmarkedLectureIds((prev) => {
+        const next = new Set(prev);
+        if (result.isBookmarked) next.add(activeLectureId);
+        else next.delete(activeLectureId);
+        return next;
+      });
+      showToast(result.isBookmarked ? "Lecture added to bookmarks!" : "Bookmark removed");
+    } catch (err: any) {
+      showToast(err.message || "Failed to update bookmark.", "danger");
+    } finally {
+      setBookmarkPending(false);
     }
   };
 
-  const isCurrentBookmarked = bookmarkedLectureIds.includes(activeLectureId);
-  const isCurrentCompleted = completedLectureIds.includes(activeLectureId);
+  const isCurrentBookmarked = activeLectureId ? bookmarkedLectureIds.has(activeLectureId) : false;
+  const isCurrentCompleted = activeLectureId ? completedLectureIds.has(activeLectureId) : false;
+
+  if (loadState === "loading") {
+    return (
+      <div className="space-y-6 pb-12">
+        <Skeleton variant="text" className="h-6 w-64" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-8 space-y-4">
+            <Skeleton variant="card" className="h-64 sm:h-96 rounded-2xl" />
+            <Skeleton variant="card" className="h-32 rounded-2xl" />
+          </div>
+          <div className="lg:col-span-4 space-y-3">
+            <Skeleton variant="card" className="h-96 rounded-2xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="py-12">
+        <EmptyState
+          icon={<AlertTriangle className="w-10 h-10 text-rose-500" />}
+          title="Couldn't load this lecture"
+          description={loadErrorMsg || "Something went wrong loading the course curriculum."}
+          actionLabel="Back to My Courses"
+          onAction={() => navigate("/app/courses")}
+        />
+      </div>
+    );
+  }
+
+  if (loadState === "empty" || !activeLecture) {
+    return (
+      <div className="py-12">
+        <EmptyState
+          icon={<BookOpen className="w-10 h-10 text-slate-400" />}
+          title="No lectures yet"
+          description="This course doesn't have any published lectures yet — check back soon."
+          actionLabel="Back to My Courses"
+          onAction={() => navigate("/app/courses")}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12">
       {/* Toast Notification System */}
       {toastMessage && (
         <ToastSystem
-          toasts={[{ id: "learn-toast", type: "success", title: toastMessage }]}
+          toasts={[{ id: "learn-toast", type: toastType, title: toastMessage }]}
           onClose={() => setToastMessage("")}
         />
       )}
 
       {/* Navigation & Header Bar */}
       <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <Link
-            to={`/app/courses/${activeLecture.courseId}`}
-            className="inline-flex items-center gap-1.5 text-xs font-extrabold text-slate-600 hover:text-[#0E2A47] transition-colors"
+            to={course ? `/app/courses/${course.id}` : "/app/courses"}
+            className="inline-flex items-center gap-1.5 text-xs font-extrabold text-slate-600 hover:text-[#0E2A47] transition-colors shrink-0"
           >
             <ArrowLeft className="w-4 h-4 text-[#0FA3A3]" /> Back to Course Overview
           </Link>
-          <span className="text-slate-300">|</span>
+          <span className="text-slate-300 shrink-0">|</span>
           <span className="text-xs font-semibold text-slate-500 truncate max-w-xs sm:max-w-md">
             {activeLecture.title}
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {/* Sidebar Toggle Button */}
           <Button
             size="sm"
@@ -160,8 +324,10 @@ export const CoursePlayerPage: React.FC = () => {
         <div className={`${isSidebarOpen ? "lg:col-span-8" : "lg:col-span-12"} space-y-5 transition-all duration-300`}>
           {/* Secure Video Player */}
           <SecurePlayer
-            lectureId={activeLectureId}
+            key={activeLecture.id}
+            lectureId={activeLecture.id}
             lectureTitle={activeLecture.title}
+            lectureDurationSeconds={activeLecture.durationSeconds}
             onComplete={handleLectureComplete}
             onEnded={handleLectureEnded}
           />
@@ -196,6 +362,7 @@ export const CoursePlayerPage: React.FC = () => {
                 variant={isCurrentBookmarked ? "secondary" : "outline"}
                 icon={<Bookmark className={`w-4 h-4 ${isCurrentBookmarked ? "fill-amber-500 text-amber-500" : ""}`} />}
                 onClick={handleBookmarkToggle}
+                disabled={bookmarkPending}
               >
                 {isCurrentBookmarked ? "Bookmarked" : "Bookmark Lecture"}
               </Button>
@@ -254,13 +421,14 @@ export const CoursePlayerPage: React.FC = () => {
                       checked={autoAdvance}
                       onChange={(e) => setAutoAdvance(e.target.checked)}
                       className="w-4 h-4 accent-[#0FA3A3] rounded cursor-pointer"
+                      aria-label="Auto-advance to the next lecture"
                     />
                   </label>
                 </div>
 
                 {/* Sections & Lectures List */}
                 <div className="space-y-4">
-                  {MOCK_SECTIONS.map((sec) => (
+                  {sections.map((sec) => (
                     <div key={sec.id} className="space-y-2">
                       <div className="px-3 py-2 bg-slate-50 rounded-xl border border-slate-100 text-xs font-bold text-[#0E2A47] flex justify-between items-center">
                         <span className="truncate">{sec.title}</span>
@@ -272,7 +440,8 @@ export const CoursePlayerPage: React.FC = () => {
                       <div className="space-y-1">
                         {sec.lectures?.map((lec) => {
                           const isCurrent = lec.id === activeLectureId;
-                          const isDone = completedLectureIds.includes(lec.id);
+                          const isDone = completedLectureIds.has(lec.id);
+                          const isBookmarked = bookmarkedLectureIds.has(lec.id);
 
                           return (
                             <button
@@ -302,7 +471,12 @@ export const CoursePlayerPage: React.FC = () => {
                                   )}
                                 </div>
 
-                                <span className="line-clamp-2 leading-snug">{lec.title}</span>
+                                <span className="line-clamp-2 leading-snug flex items-center gap-1">
+                                  {lec.title}
+                                  {isBookmarked && (
+                                    <Bookmark className="w-3 h-3 fill-amber-500 text-amber-500 shrink-0" />
+                                  )}
+                                </span>
                               </div>
 
                               <span className="text-[10px] font-semibold text-slate-400 shrink-0">

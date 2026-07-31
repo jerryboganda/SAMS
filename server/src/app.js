@@ -46,6 +46,18 @@ app.use('/api/v1', v1Router);
 // The SPA fallback regex below already excludes `/uploads/*` from its catch-all.
 app.use('/uploads', express.static(path.join(REPO_ROOT, 'storage', 'uploads')));
 
+// --- Dev-only sample video asset (mock VideoProvider driver) --------------
+// Serves storage/dev-assets/sample.mp4 so the `mock` VideoProvider driver
+// (server/src/adapters/video/mock.js, docs/07_EXECUTION_PLAN.md 5.1) has a
+// genuinely playable local URL with zero credentials, for local dev/tests/
+// demos. This is purely a local test fixture path — NEVER used to serve or
+// proxy the real Bunny CDN (that always goes through the signed token URLs
+// built by server/src/adapters/video/bunny.js). Disabled outside dev/test so
+// a production deploy never exposes it, regardless of VIDEO_PROVIDER.
+if (env.NODE_ENV !== 'production') {
+  app.use('/dev-assets', express.static(path.join(REPO_ROOT, 'storage', 'dev-assets')));
+}
+
 // --- SEO: robots.txt + sitemap.xml (docs/07_EXECUTION_PLAN.md 3.5) --------
 // Always available regardless of client/dist presence — these are
 // server-generated, not part of the SPA build.
@@ -76,10 +88,10 @@ if (fs.existsSync(CLIENT_DIST) && fs.existsSync(CLIENT_INDEX_HTML)) {
   // for invalid/unpublished/nonexistent slugs — not a special 404 case.
   app.get('/courses/:slug', seoController.courseDetailMeta);
 
-  // SPA fallback for deep links (e.g. /courses) — but never for /api/* or
-  // /uploads/*, which must fall through to the 404 handler below if
-  // unmatched by their own routers.
-  app.get(/^\/(?!api\/|uploads\/).*/, (req, res) => {
+  // SPA fallback for deep links (e.g. /courses) — but never for /api/*,
+  // /uploads/*, or /dev-assets/*, which must fall through to the 404 handler
+  // below if unmatched by their own routers.
+  app.get(/^\/(?!api\/|uploads\/|dev-assets\/).*/, (req, res) => {
     res.sendFile(CLIENT_INDEX_HTML);
   });
 } else {

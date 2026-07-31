@@ -92,4 +92,52 @@ export const contactLimiter = rateLimit({
   handler: envelopeHandler('RATE_LIMITED', 'Too many messages sent. Please try again later.'),
 });
 
-export default { authLimiter, resendVerificationLimiter, resendVerificationIpLimiter, contactLimiter };
+/**
+ * GET /student/lectures/:id/play: 30 requests / min, keyed per authenticated
+ * user (falls back to per-IP for the anonymous free-preview case, since
+ * there's no user id to key on) — docs/04_API_SPEC.md §8 "play endpoint
+ * 30/min/user". `max` raised under NODE_ENV=test for the same reason as the
+ * other limiters in this file (a security-critical-endpoint test suite hits
+ * /play many times per scenario — session-steal, resume, etc. — and a real
+ * 30/min cap would produce spurious 429s unrelated to what each test is
+ * actually asserting).
+ */
+export const playLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: IS_TEST ? 100000 : 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user?.id ? `user:${req.user.id}` : req.ip),
+  handler: envelopeHandler('RATE_LIMITED', 'Too many playback requests. Please slow down.'),
+});
+
+/**
+ * PUT /student/lectures/:id/heartbeat: 8 requests / min / user (security
+ * audit 2026-07-31, Finding 2 — Medium). The real player heartbeats every
+ * ~15s (client/src/components/player/SecurePlayer.tsx), i.e. ~4/min steady
+ * state; 8/min gives ~2x slack for reconnects/retries/clock jitter while
+ * still bounding scripted rapid-fire abuse that the elapsed-time cross-check
+ * in videoService.heartbeat() also guards against independently (defense in
+ * depth — this limiter bounds request volume, the cross-check bounds what
+ * each individual call can credit). Mounted only on the authenticated
+ * heartbeat route (after `auth`), so it can always key by user id like
+ * `playLimiter` does for its authenticated case. `max` raised under
+ * NODE_ENV=test for the same reason as the other limiters in this file.
+ */
+export const heartbeatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: IS_TEST ? 100000 : 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user?.id ? `user:${req.user.id}` : req.ip),
+  handler: envelopeHandler('RATE_LIMITED', 'Too many heartbeat requests. Please slow down.'),
+});
+
+export default {
+  authLimiter,
+  resendVerificationLimiter,
+  resendVerificationIpLimiter,
+  contactLimiter,
+  playLimiter,
+  heartbeatLimiter,
+};

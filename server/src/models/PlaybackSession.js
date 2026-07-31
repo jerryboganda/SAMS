@@ -34,8 +34,13 @@ export default (sequelize) => {
       allowNull: false,
       unique: true,
     },
+    // DATE(3) (millisecond precision) — see migration
+    // 20260101000034-add-precision-to-playback-session-heartbeat.cjs. Plain
+    // whole-second DATETIME made the elapsed-time cross-check in
+    // videoService.heartbeat() (security audit 2026-07-31, Finding 2)
+    // systematically over-credit rapid-fire calls by up to ~1s each.
     lastHeartbeatAt: {
-      type: DataTypes.DATE,
+      type: DataTypes.DATE(3),
       allowNull: false,
     },
     endedAt: {

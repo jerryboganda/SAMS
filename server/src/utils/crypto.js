@@ -43,6 +43,15 @@ export function randomNumericCode(digits = 6) {
 }
 
 /**
+ * A fresh CHAR(36) UUID (v4) — used for `playback_sessions.session_key`
+ * (docs/03_DATABASE_SCHEMA.md) and for the unlocked, non-persisted session
+ * key handed to anonymous free-preview viewers (Phase 5.2 — see DECISIONS.md).
+ */
+export function randomUuid() {
+  return crypto.randomUUID();
+}
+
+/**
  * AES-256-GCM encrypt. Output is base64(iv(12B) || authTag(16B) || ciphertext),
  * a single self-contained string. Deliberately compact: `users.twofa_secret`
  * is VARCHAR(64) (see DECISIONS.md for the byte-budget math that shaped the

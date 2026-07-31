@@ -6,10 +6,7 @@
 // minutes — docs/10_SECURITY_CHECKLIST.md §C. Must run AFTER auth (needs
 // req.user).
 import { ApiError } from '../utils/apiError.js';
-import { sha256Hex } from '../utils/crypto.js';
-import db from '../models/index.js';
-
-const { UserDevice } = db;
+import { findActiveDeviceByToken } from '../services/deviceService.js';
 
 export async function deviceCheck(req, res, next) {
   try {
@@ -18,10 +15,10 @@ export async function deviceCheck(req, res, next) {
       throw new ApiError(401, 'UNAUTHENTICATED', 'Device not recognized — please log in again.');
     }
 
-    const deviceTokenHash = sha256Hex(rawDeviceToken);
-    const device = await UserDevice.findOne({
-      where: { userId: req.user.id, deviceTokenHash, isActive: true },
-    });
+    // Shared lookup with the soft/optional device check used by
+    // GET /student/lectures/:id/play's free-preview branch (see
+    // services/deviceService.js's findActiveDeviceByToken doc comment).
+    const device = await findActiveDeviceByToken(req.user.id, rawDeviceToken);
 
     if (!device) {
       throw new ApiError(401, 'UNAUTHENTICATED', 'Device not recognized — please log in again.');

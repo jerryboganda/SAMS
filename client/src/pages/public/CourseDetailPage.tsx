@@ -19,6 +19,7 @@ import {
   Check,
 } from "lucide-react";
 import { Card, Button, Badge, Modal } from "../../components/ui";
+import { SecurePlayer } from "../../components/player/SecurePlayer";
 import { MOCK_COURSES, MOCK_SECTIONS, MOCK_FAQS, MOCK_ENROLLMENTS } from "../../mock-data";
 import { useAuth } from "../../stores/authStore";
 import { formatPKR, formatDuration } from "../../utils/formatters";
@@ -450,27 +451,25 @@ export const CourseDetailPage: React.FC = () => {
       >
         {previewLecture && (
           <div className="space-y-4 p-2">
-            {/* Player Container */}
-            <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center border border-slate-800 shadow-inner">
-              {/* Dynamic Watermark Overlay Banner */}
-              <div className="absolute top-4 left-4 z-20 bg-black/60 text-white/80 text-[10px] font-mono px-2.5 py-1 rounded-md border border-white/20 backdrop-blur-xs select-none">
-                PREVIEW WATERMARK • SAMS ACADEMY DEMO
-              </div>
-
-              {/* Video Placeholder Content */}
-              <div className="text-center space-y-3 p-6 z-10 max-w-md">
-                <div className="w-16 h-16 rounded-full bg-[#0FA3A3]/20 text-[#0FA3A3] flex items-center justify-center mx-auto border border-[#0FA3A3]/50 animate-pulse">
-                  <Play className="w-8 h-8 fill-[#0FA3A3] ml-1" />
-                </div>
-                <h3 className="text-base font-bold text-white">{previewLecture.title}</h3>
-                <p className="text-xs text-slate-300 line-clamp-2">
-                  {previewLecture.description || "High-yield medical lecture preview."}
-                </p>
-                <div className="inline-block px-3 py-1 bg-white/10 rounded-full text-xs font-mono text-[#0FA3A3]">
-                  Duration: {formatDuration(previewLecture.durationSeconds)}
-                </div>
-              </div>
-            </div>
+            {/*
+              Real, unauthenticated free-preview playback — GET
+              /student/lectures/:id/play allows role P (anonymous) for
+              `isFreePreview` lectures (server/src/services/videoService.js),
+              returning a literal "PREVIEW" watermark and a resumeAt of 0.
+              SecurePlayer itself gates heartbeat/mark-complete behind
+              `useAuth().isAuthenticated`, so an anonymous viewer here never
+              attempts either (see docs/07_EXECUTION_PLAN.md 5.5 + the
+              client/src/components/player/SecurePlayer.tsx header comment).
+              A logged-in-but-not-enrolled visitor gets the same preview
+              treatment; an enrolled visitor previewing still works fine —
+              this modal is reachable regardless of enrollment status.
+            */}
+            <SecurePlayer
+              key={previewLecture.id}
+              lectureId={previewLecture.id}
+              lectureTitle={previewLecture.title}
+              lectureDurationSeconds={previewLecture.durationSeconds}
+            />
 
             {/* Modal CTA Note */}
             <div className="p-4 bg-slate-50 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">

@@ -143,6 +143,22 @@ export async function finalizeDevice(userId, req, res, matchResult) {
   return row;
 }
 
+/**
+ * Read-only, non-throwing device-token lookup: the active `user_devices` row
+ * for `userId` matching the raw device-token cookie value, or `null` if
+ * missing/invalid. Extracted out of middleware/deviceCheck.js so both the
+ * hard-fail middleware (throws 401 on null) and soft/optional call sites
+ * (e.g. GET /student/lectures/:id/play's free-preview branch — an
+ * authenticated viewer with an invalid device is still allowed to watch the
+ * preview, just without a real stream lock, per DECISIONS.md Phase 5.2) can
+ * share the exact same lookup logic.
+ */
+export async function findActiveDeviceByToken(userId, rawDeviceToken) {
+  if (!userId || !rawDeviceToken) return null;
+  const deviceTokenHash = sha256Hex(rawDeviceToken);
+  return UserDevice.findOne({ where: { userId, deviceTokenHash, isActive: true } });
+}
+
 /** GET /auth/devices listing — masked (no token hash), current device flagged. */
 export async function listDevicesForUser(userId, req) {
   const devices = await UserDevice.findAll({ where: { userId }, order: [['lastSeenAt', 'DESC']] });
@@ -166,5 +182,6 @@ export default {
   matchDevice,
   assertDeviceCapacity,
   finalizeDevice,
+  findActiveDeviceByToken,
   listDevicesForUser,
 };

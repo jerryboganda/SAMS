@@ -6,6 +6,7 @@ import health from './health.js';
 import auth from './auth.js';
 import publicRouter from './public.js';
 import adminRouter from './admin/index.js';
+import studentRouter from './student/index.js';
 
 const router = Router();
 
@@ -13,5 +14,6 @@ router.use('/health', health);
 router.use('/auth', auth);
 router.use('/public', publicRouter);
 router.use('/admin', adminRouter);
+router.use('/student', studentRouter);
 
 export default router;

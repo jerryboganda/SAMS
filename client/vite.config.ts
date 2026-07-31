@@ -19,8 +19,20 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       // Dev-only proxy: forward /api/* to the Express server (server/src,
       // port 5000) so the SPA can call same-origin `/api/v1/...` in dev too.
+      // /dev-assets/* is forwarded the same way — it's where the `mock`
+      // VideoProvider driver serves storage/dev-assets/sample.mp4 from
+      // (server/src/app.js), and SecurePlayer.tsx's <video>/<iframe> src
+      // is a same-origin relative URL returned by `/play` (e.g.
+      // "/dev-assets/sample.mp4"), which the browser resolves against
+      // whatever origin served the page — the Vite dev server (port 3000)
+      // without this entry, 404ing since only Express (port 5000) actually
+      // has that route. See DECISIONS.md 2026-07-31 (Phase 5.4-5.5).
       proxy: {
         '/api': {
+          target: 'http://localhost:5000',
+          changeOrigin: true,
+        },
+        '/dev-assets': {
           target: 'http://localhost:5000',
           changeOrigin: true,
         },
