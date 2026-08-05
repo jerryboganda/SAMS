@@ -12,6 +12,8 @@ import mockExamsRouter from './mockExams.js';
 import checkoutRouter from './checkout.js';
 import ordersRouter from './orders.js';
 import webhooksRouter from './webhooks.js';
+import notificationsRouter from './notifications.js';
+import announcementsRouter from './announcements.js';
 
 const router = Router();
 
@@ -30,5 +32,9 @@ router.use('/mock-exams', mockExamsRouter);
 router.use('/checkout', checkoutRouter);
 router.use('/orders', ordersRouter);
 router.use('/webhooks', webhooksRouter);
+// Top-level per docs/07_EXECUTION_PLAN.md 10.1/10.2 — same "own resource
+// family, not nested under /student" rationale as /checkout, /orders above.
+router.use('/notifications', notificationsRouter);
+router.use('/announcements', announcementsRouter);
 
 export default router;

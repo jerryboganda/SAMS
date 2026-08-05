@@ -20,6 +20,7 @@ import mockExamsRouter from './mockExams.js';
 import bankTransfersRouter from './bankTransfers.js';
 import ordersRouter from './orders.js';
 import couponsRouter from './coupons.js';
+import announcementsRouter from './announcements.js';
 
 const router = Router();
 
@@ -38,5 +39,7 @@ router.use(bankTransfersRouter);
 // docs/07_EXECUTION_PLAN.md 9.8 — admin orders management + coupons CRUD.
 router.use(ordersRouter);
 router.use(couponsRouter);
+// docs/07_EXECUTION_PLAN.md 10.2 — admin announcement composer/broadcast.
+router.use(announcementsRouter);
 
 export default router;

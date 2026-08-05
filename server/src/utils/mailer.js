@@ -138,4 +138,31 @@ export function passwordChangedTemplate({ user }) {
   };
 }
 
+/** Mirrors the wording services/orderService.js's sendPurchaseConfirmation used inline before Phase 10's notificationService.js consolidated it. */
+export function purchaseConfirmedTemplate({ user, order, courseTitle }) {
+  return {
+    to: user.email,
+    subject: 'Your SAMS Academy purchase is confirmed',
+    text:
+      `Hi ${user.name},\n\n` +
+      `Thanks for your purchase! Your enrollment in "${courseTitle}" is now active.\n\n` +
+      `Invoice: ${order.invoiceNo}\n` +
+      `Amount paid: ${order.finalAmount} ${order.currency}\n\n` +
+      `You can view your invoice any time from your Orders page.`,
+  };
+}
+
+/** Mirrors the wording services/manualPaymentService.js's notifyRejection used inline before Phase 10's notificationService.js consolidated it. */
+export function paymentRejectedTemplate({ user, order, reason }) {
+  return {
+    to: user.email,
+    subject: 'Your SAMS Academy payment could not be verified',
+    text:
+      `Hi ${user.name},\n\n` +
+      `We were unable to verify your payment for invoice ${order.invoiceNo}.\n\n` +
+      `Reason: ${reason}\n\n` +
+      `Please place a new order and submit a fresh payment proof to try again.`,
+  };
+}
+
 export default sendMail;

@@ -34,25 +34,38 @@ export const StudentLayout: React.FC = () => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   // Real unread count from GET /student/dashboard's `unreadNotificationsCount`
-  // — there's no real `GET /notifications` list endpoint yet (only the
-  // dashboard aggregate ships it), so this is the badge count only; the
-  // popover below shows a count-based summary instead of fabricated
-  // per-notification content. See DECISIONS.md's Phase 6.2-6.3 entry.
+  // (Phase 6). The popover below deliberately stays a count-based summary
+  // rather than a full per-notification list — the real GET /notifications
+  // list endpoint (Phase 10.3) now exists and backs the "View All" page
+  // (NotificationsPage.tsx), but duplicating its content into this popover
+  // was judged out of scope for Phase 10.3's own AC ("unread badge
+  // updates"). See DECISIONS.md's Phase 6.2-6.3 and Phase 10 entries.
+  //
+  // This layout persists across route changes (Outlet-based), so the mount
+  // effect below only fires once — without the event listener, marking
+  // notifications read on NotificationsPage.tsx would never be reflected
+  // here until a full page reload. `notifications-updated` is dispatched by
+  // NotificationsPage.tsx after a successful mark-read call, same
+  // custom-event pattern already used for `start-student-guided-tour`.
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadUnreadCount = async () => {
       try {
         const stats = await studentApi.getDashboardStats();
         if (!cancelled) setUnreadCount(stats.unreadNotificationsCount);
       } catch (err) {
-        // Non-fatal — the badge just stays at 0 until the next successful load.
+        // Non-fatal — the badge just stays at its last known value.
         console.error("Failed to load unread notification count", err);
       }
-    })();
+    };
+
+    loadUnreadCount();
+    window.addEventListener("notifications-updated", loadUnreadCount);
     return () => {
       cancelled = true;
+      window.removeEventListener("notifications-updated", loadUnreadCount);
     };
   }, []);
 

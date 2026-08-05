@@ -83,12 +83,12 @@ import { Op } from 'sequelize';
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
 import logger from '../utils/logger.js';
-import { sendMail } from '../utils/mailer.js';
 import { sniffImageType } from '../utils/imageValidation.js';
 import { REPO_ROOT } from '../config/env.js';
 import * as orderService from './orderService.js';
+import * as notificationService from './notificationService.js';
 
-const { Order, BankTransferProof, User, sequelize } = db;
+const { Order, BankTransferProof, sequelize } = db;
 const {
   PAYABLE_STATUSES,
   ORDER_ASSOCIATIONS,
@@ -353,29 +353,10 @@ export async function approveBankTransfer({ orderId, adminUserId }) {
   return serializeOrder(fresh);
 }
 
-/** Best-effort rejection notification — mirrors orderService.js's own sendPurchaseConfirmation style (Notification.create + optional email, never throws, never blocks the actual rejection). */
+/** Best-effort rejection notification — Phase 10.1 delegates to services/notificationService.js instead of duplicating Notification.create()+sendMail() inline (never throws, never blocks the actual rejection — see the caller's own catch). */
 async function notifyRejection({ order, reason }) {
-  await db.Notification.create({
-    userId: order.userId,
-    type: 'purchase_rejected',
-    title: 'Payment verification failed',
-    body: `Your payment proof for invoice ${order.invoiceNo} could not be verified. Reason: ${reason}. Please place a new order to try again.`,
-    link: `/order/${order.id}/status`,
-    isRead: false,
-  });
-
-  const user = await User.findByPk(order.userId);
-  if (user?.email) {
-    await sendMail({
-      to: user.email,
-      subject: 'Your SAMS Academy payment could not be verified',
-      text:
-        `Hi ${user.name},\n\n` +
-        `We were unable to verify your payment for invoice ${order.invoiceNo}.\n\n` +
-        `Reason: ${reason}\n\n` +
-        `Please place a new order and submit a fresh payment proof to try again.`,
-    });
-  }
+  const user = await db.User.findByPk(order.userId);
+  await notificationService.notifyPaymentRejected({ order, reason, user });
 }
 
 /**

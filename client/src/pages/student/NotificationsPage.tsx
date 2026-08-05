@@ -23,10 +23,18 @@ export const NotificationsPage: React.FC = () => {
     loadNotifications();
   }, []);
 
+  // Dispatched after a successful mark-read call so StudentLayout.tsx's
+  // persistent bell badge (which only loads once on mount — this page is a
+  // separate route, not a remount) picks up the new unread count without
+  // requiring a full page reload. Same custom-event pattern already used
+  // for `start-student-guided-tour`.
+  const notifyBadgeToRefresh = () => window.dispatchEvent(new CustomEvent("notifications-updated"));
+
   const handleMarkAllRead = async () => {
     try {
       await notificationsApi.markAsRead(undefined, true);
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      notifyBadgeToRefresh();
     } catch (err) {
       console.error("Failed to mark notifications as read", err);
     }
@@ -36,6 +44,7 @@ export const NotificationsPage: React.FC = () => {
     try {
       await notificationsApi.markAsRead([id]);
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+      notifyBadgeToRefresh();
     } catch (err) {
       console.error("Failed to mark notification as read", err);
     }

@@ -9,7 +9,7 @@ import { testOutbox } from '../../src/utils/mailer.js';
 import { createVerifiedUser, uniqueEmail } from '../helpers/testUsers.js';
 import { loginNewDeviceAndReverify, getCookieValue } from '../helpers/loginFlow.js';
 
-const { AuditLog, sequelize } = db;
+const { AuditLog, Notification, sequelize } = db;
 
 beforeEach(() => {
   testOutbox.length = 0;
@@ -28,7 +28,11 @@ describe('GET /api/v1/auth/me', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.email).toBe(email);
     expect(res.body.data.enrollmentSummary).toEqual([]);
-    expect(res.body.data.unreadNotifications).toBe(0);
+    // docs/07_EXECUTION_PLAN.md 10.1: loginNewDeviceAndReverify() above is a
+    // genuinely new-device login, which now also creates an in-app
+    // 'new_device' Notification row (previously email-only) — so a freshly
+    // logged-in user has exactly 1 unread notification, not 0.
+    expect(res.body.data.unreadNotifications).toBe(1);
   });
 
   test('auth failure: no session cookies → 401 UNAUTHENTICATED', async () => {
@@ -66,7 +70,7 @@ describe('PATCH /api/v1/auth/me', () => {
 
 describe('POST /api/v1/auth/change-password', () => {
   test('happy path + edge: logs out other sessions but keeps the current one, and rejects the old password afterwards', async () => {
-    const { email, password } = await createVerifiedUser({ email: uniqueEmail('changepw') });
+    const { user, email, password } = await createVerifiedUser({ email: uniqueEmail('changepw') });
     const sessionA = await loginNewDeviceAndReverify(app, { email, password, userAgent: 'DeviceA/1.0' });
     const sessionB = await loginNewDeviceAndReverify(app, { email, password, userAgent: 'DeviceB/1.0' });
     const refreshB = getCookieValue(sessionB.reverifyRes, 'refresh_token');
@@ -76,6 +80,11 @@ describe('POST /api/v1/auth/change-password', () => {
       .post('/api/v1/auth/change-password')
       .send({ current: password, new: newPassword });
     expect(changeRes.status).toBe(200);
+
+    // docs/07_EXECUTION_PLAN.md 10.1: change-password now also creates an
+    // in-app Notification row (previously email-only).
+    const passwordChangedNotification = await Notification.findOne({ where: { userId: user.id, type: 'password_changed' } });
+    expect(passwordChangedNotification).not.toBeNull();
 
     // Other session (device B) must now be revoked.
     const refreshBAfter = await request(app).post('/api/v1/auth/refresh').set('Cookie', `refresh_token=${refreshB}`);

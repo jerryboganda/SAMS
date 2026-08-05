@@ -8,7 +8,7 @@ import { testOutbox } from '../../src/utils/mailer.js';
 import { createVerifiedUser, uniqueEmail, DEFAULT_TEST_PASSWORD } from '../helpers/testUsers.js';
 import { loginNewDeviceAndReverify, extractReverifyCode, getCookieValue } from '../helpers/loginFlow.js';
 
-const { sequelize } = db;
+const { sequelize, Notification } = db;
 
 beforeEach(() => {
   testOutbox.length = 0;
@@ -20,7 +20,7 @@ afterAll(async () => {
 
 describe('POST /api/v1/auth/login', () => {
   test('happy path: a second login from an already-registered device completes directly with cookies', async () => {
-    const { email, password } = await createVerifiedUser({ email: uniqueEmail('login-happy') });
+    const { user, email, password } = await createVerifiedUser({ email: uniqueEmail('login-happy') });
     const { agent } = await loginNewDeviceAndReverify(app, { email, password, userAgent: 'HappyDevice/1.0' });
 
     const res = await agent.post('/api/v1/auth/login').set('User-Agent', 'HappyDevice/1.0').send({ email, password });
@@ -32,6 +32,12 @@ describe('POST /api/v1/auth/login', () => {
     const setCookie = res.headers['set-cookie'].join(';');
     expect(setCookie).toMatch(/access_token=/);
     expect(setCookie).toMatch(/refresh_token=/);
+
+    // docs/07_EXECUTION_PLAN.md 10.1: the earlier loginNewDeviceAndReverify()
+    // call above completed a genuinely new-device login+reverify, which now
+    // also creates an in-app Notification row (previously email-only).
+    const newDeviceNotification = await Notification.findOne({ where: { userId: user.id, type: 'new_device' } });
+    expect(newDeviceNotification).not.toBeNull();
   });
 
   test('auth failure: wrong password → 401 INVALID_CREDENTIALS', async () => {

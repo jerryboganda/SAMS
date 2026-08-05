@@ -24,13 +24,13 @@
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
 import logger from '../utils/logger.js';
-import { sendMail } from '../utils/mailer.js';
 import { getPaymentGateway } from '../adapters/payments/index.js';
 import * as couponService from './couponService.js';
 import * as enrollmentService from './enrollmentService.js';
 import * as invoiceService from './invoiceService.js';
+import * as notificationService from './notificationService.js';
 
-const { Order, Coupon, Course, User, Enrollment, Notification, PaymentEvent, BankTransferProof, Setting, sequelize } = db;
+const { Order, Coupon, Course, User, Enrollment, PaymentEvent, BankTransferProof, Setting, sequelize } = db;
 
 const INVOICE_SEQ_KEY = 'invoice_seq';
 // docs/03_DATABASE_SCHEMA.md's orders.status ENUM values an order can be in
@@ -354,34 +354,11 @@ export async function getInvoiceFileForViewer(orderId, viewer) {
 // THE SHARED PAYMENT-SUCCESS PATH
 // ---------------------------------------------------------------------------
 
-// MINIMAL Phase 9.2 "purchase confirmed" notification — docs/07_EXECUTION_PLAN.md
-// 10.1 builds the real notificationService (create+email TEMPLATES for every
-// trigger: purchase, bank approve/reject, expiry, new-device,
-// password-changed) and should refactor THIS call site to go through it
-// instead of duplicating logic — this is deliberately just enough to satisfy
-// this phase's own "purchase confirmed" AC (task brief), not that service.
+// Phase 10.1: delegates to services/notificationService.js — the shared
+// "create a Notification row + optionally email" trigger for a successful
+// purchase — instead of duplicating that logic inline.
 async function sendPurchaseConfirmation({ order, course, user }) {
-  await Notification.create({
-    userId: order.userId,
-    type: 'purchase_paid',
-    title: 'Purchase confirmed',
-    body: `Your enrollment in "${course?.title ?? `course #${order.courseId}`}" is now active. Invoice ${order.invoiceNo}.`,
-    link: `/order/${order.id}/status`,
-    isRead: false,
-  });
-
-  if (user?.email) {
-    await sendMail({
-      to: user.email,
-      subject: 'Your SAMS Academy purchase is confirmed',
-      text:
-        `Hi ${user.name},\n\n` +
-        `Thanks for your purchase! Your enrollment in "${course?.title ?? `course #${order.courseId}`}" is now active.\n\n` +
-        `Invoice: ${order.invoiceNo}\n` +
-        `Amount paid: ${order.finalAmount} ${order.currency}\n\n` +
-        `You can view your invoice any time from your Orders page.`,
-    });
-  }
+  await notificationService.notifyPurchaseConfirmed({ order, course, user });
 }
 
 /** Runs strictly AFTER completeOrderPayment's DB transaction has committed — invoice PDF generation is file I/O and email is network I/O, neither should hold a DB transaction/row-lock open. Failures here are logged, not thrown — the order/enrollment/coupon-redemption already committed successfully and must not be undone just because, say, disk was briefly full. GET /orders/:id/invoice.pdf self-heals via invoiceService's get-or-create if this step's PDF generation failed. */

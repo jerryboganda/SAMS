@@ -10,9 +10,10 @@ import { ApiError } from '../utils/apiError.js';
 import { sha256Hex, randomTokenHex, randomNumericCode } from '../utils/crypto.js';
 import { signAccessToken } from '../utils/jwt.js';
 import { setAccessTokenCookie, setRefreshTokenCookie, clearSessionCookies } from '../utils/cookies.js';
-import { sendMail, verifyEmailTemplate, passwordResetTemplate, reverifyCodeTemplate, newDeviceAlertTemplate, passwordChangedTemplate } from '../utils/mailer.js';
+import { sendMail, verifyEmailTemplate, passwordResetTemplate, reverifyCodeTemplate } from '../utils/mailer.js';
 import { matchDevice, assertDeviceCapacity, finalizeDevice } from './deviceService.js';
 import { verifyTwofaOrBackup } from './twofaService.js';
+import * as notificationService from './notificationService.js';
 import { env } from '../config/env.js';
 import {
   REFRESH_TOKEN_TTL_MS,
@@ -179,7 +180,7 @@ async function completeLoginSession(user, device, req, res) {
 
 async function maybeSendNewDeviceAlert(user, req, matchResult, device) {
   if (!matchResult.isNewCandidate) return;
-  await sendMail(newDeviceAlertTemplate({ user, ip: normalizeIp(req.ip), deviceName: device?.deviceName }));
+  await notificationService.notifyNewDeviceLogin({ user, ip: normalizeIp(req.ip), deviceName: device?.deviceName });
 }
 
 // ---------------------------------------------------------------------------
@@ -531,8 +532,7 @@ export async function getMe(userId) {
     ...serializeUser(user),
     // TODO(Phase 6): populate from enrollmentService once it exists.
     enrollmentSummary: [],
-    // TODO(Phase 10): populate from notificationService once it exists.
-    unreadNotifications: 0,
+    unreadNotifications: await notificationService.getUnreadNotificationCount(userId),
   };
 }
 
@@ -576,7 +576,7 @@ export async function changePassword(userId, { current, new: nextPassword }, req
     }
   );
 
-  await sendMail(passwordChangedTemplate({ user }));
+  await notificationService.notifyPasswordChanged({ user });
 }
 
 export async function forgotPassword(email) {

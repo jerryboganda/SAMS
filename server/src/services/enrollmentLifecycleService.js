@@ -20,9 +20,9 @@
 import { Op } from 'sequelize';
 import db from '../models/index.js';
 import logger from '../utils/logger.js';
-import { sendMail, enrollmentExpiringReminderTemplate } from '../utils/mailer.js';
+import * as notificationService from './notificationService.js';
 
-const { Enrollment, Course, User, Notification } = db;
+const { Enrollment, Course, User } = db;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -68,13 +68,10 @@ const REMINDER_WINDOW_MAX_DAYS = 8;
 /**
  * Finds every `status='active'` enrollment expiring within the
  * ~6-8-day-from-now window that hasn't already been reminded
- * (`expiry_reminder_sent_at IS NULL`), sends a `Notification.create()` +
- * best-effort plain-text email for each, then stamps
- * `expiry_reminder_sent_at` so a later sweep (today's or any future day's)
- * never re-sends it. Mirrors orderService.js#sendPurchaseConfirmation's
- * "minimal, direct Notification.create() + optional email" style
- * deliberately — Phase 10's real notificationService doesn't exist yet,
- * this is just enough for this task, not a bigger notification system.
+ * (`expiry_reminder_sent_at IS NULL`), fires
+ * services/notificationService.js#notifyEnrollmentExpiringSoon (in-app row +
+ * best-effort email) for each, then stamps `expiry_reminder_sent_at` so a
+ * later sweep (today's or any future day's) never re-sends it.
  */
 export async function sendExpiringReminders() {
   const now = new Date();
@@ -110,18 +107,7 @@ export async function sendExpiringReminders() {
     // somehow unavailable (defensive only, per the `!user` guard above).
     const courseLink = course?.slug ? `/courses/${course.slug}` : '/courses';
 
-    await Notification.create({
-      userId: enrollment.userId,
-      type: 'enrollment_expiring_soon',
-      title: 'Your enrollment is expiring soon',
-      body: `Your access to "${courseTitle}" expires in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} (on ${expiryDateStr}). Renew to keep your access.`,
-      link: courseLink,
-      isRead: false,
-    });
-
-    if (user.email) {
-      await sendMail(enrollmentExpiringReminderTemplate({ user, courseTitle, daysRemaining, expiryDateStr }));
-    }
+    await notificationService.notifyEnrollmentExpiringSoon({ enrollment, user, courseTitle, daysRemaining, expiryDateStr, courseLink });
 
     enrollment.expiryReminderSentAt = now;
     await enrollment.save();

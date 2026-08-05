@@ -141,7 +141,10 @@ describe('GET /api/v1/student/dashboard', () => {
     expect(data.announcements.length).toBeLessThanOrEqual(5);
 
     // --- unread notification count ---
-    expect(data.unreadNotificationsCount).toBe(2);
+    // 2 explicit unread rows created above, +1 for the 'new_device'
+    // Notification loginNewDeviceAndReverify() itself creates (Phase 10.1 —
+    // previously email-only, see services/authService.js#maybeSendNewDeviceAlert).
+    expect(data.unreadNotificationsCount).toBe(3);
   });
 
   test('continue-watching picks the most-recently-updated incomplete lecture, not just any incomplete one', async () => {
@@ -183,7 +186,9 @@ describe('GET /api/v1/student/dashboard', () => {
     expect(data.continueWatching).toBeUndefined();
     expect(data.studyHours7d).toBe(0);
     expect(data.studyHoursTotal).toBe(0);
-    expect(data.unreadNotificationsCount).toBe(0);
+    // 1, not 0: loginNewDeviceAndReverify() above creates a 'new_device'
+    // Notification row (Phase 10.1 — see the comment on the happy-path test above).
+    expect(data.unreadNotificationsCount).toBe(1);
     expect(Array.isArray(data.announcements)).toBe(true);
   });
 
