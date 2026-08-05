@@ -56,13 +56,18 @@ describe('mock payment adapter — interface contract', () => {
     expect(mockGateway.isConfigured()).toBe(true);
   });
 
-  test('createCheckout(order) mirrors a real hosted-checkout redirect: redirectUrl points at our OWN /checkout/return/mock with orderId+token', async () => {
+  test('createCheckout(order) mirrors a real hosted-checkout redirect: redirectUrl points at our OWN GET /api/v1/checkout/return/mock (the actual mounted route, server/src/routes/v1/index.js) with orderId+token', async () => {
     const order = { id: 123, invoiceNo: 'SAMS-2026-00001' };
     const { redirectUrl } = await mockGateway.createCheckout(order);
 
     expect(redirectUrl.startsWith(env.APP_URL)).toBe(true);
     const url = new URL(redirectUrl);
-    expect(url.pathname).toBe('/checkout/return/mock');
+    // Regression guard for docs/07_EXECUTION_PLAN.md 9.7's live-browser-verification bug find
+    // (DECISIONS.md 2026-08-05): the real router mounts checkoutRouter under '/api/v1/checkout'
+    // (app.js: app.use('/api/v1', v1Router); routes/v1/index.js: router.use('/checkout', ...)) —
+    // a redirectUrl missing the '/api/v1' prefix 404s in a real browser (this file's OWN header
+    // comment already documented the correct path; only this literal string was wrong).
+    expect(url.pathname).toBe('/api/v1/checkout/return/mock');
     expect(url.searchParams.get('orderId')).toBe('123');
     expect(verifyMockToken(123, url.searchParams.get('token'))).toBe(true);
   });

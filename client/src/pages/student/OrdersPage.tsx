@@ -8,27 +8,32 @@ import {
   AlertTriangle,
   Printer,
   FileText,
-  Building2,
-  X,
+  Eye,
 } from "lucide-react";
 import { Card, Button, Badge, Modal } from "../../components/ui";
 import { checkoutApi } from "../../api/endpoints/checkout";
 import { Order } from "../../types";
 import { formatPKR } from "../../utils/formatters";
+import { resolveOrderBadgeState } from "../../utils/orders";
+import { CONFIG } from "../../config";
 
 export const OrdersPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<Order | null>(null);
+  const [selectedProofOrder, setSelectedProofOrder] = useState<Order | null>(null);
 
   useEffect(() => {
     async function loadOrders() {
       setIsLoading(true);
+      setLoadError("");
       try {
         const list = await checkoutApi.getMyOrders();
         setOrders(list);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to load orders", err);
+        setLoadError(err.message || "Unable to load your orders. Please try again.");
       } finally {
         setIsLoading(false);
       }
@@ -40,17 +45,21 @@ export const OrdersPage: React.FC = () => {
     window.print();
   };
 
-  const getStatusBadge = (status: string, rejectReason?: string) => {
-    switch (status) {
+  /** Opens the REAL server-generated PDF (GET /orders/:id/invoice.pdf, owner-or-admin only — same-origin httpOnly auth cookies are sent automatically on this normal browser navigation, no special fetch needed). */
+  const handleDownloadRealInvoice = (orderId: number) => {
+    window.open(`${CONFIG.API_BASE_URL}/orders/${orderId}/invoice.pdf`, "_blank", "noopener,noreferrer");
+  };
+
+  /** Badge JSX for the REAL 4 states resolveOrderBadgeState resolves to — see that helper's own doc comment for why `orders.status` alone can never literally be `'rejected'`. */
+  const getStatusBadge = (order: Order) => {
+    switch (resolveOrderBadgeState(order)) {
       case "paid":
-      case "approved":
         return (
           <Badge variant="emerald" size="sm" className="font-extrabold uppercase">
             <CheckCircle2 className="w-3 h-3 mr-1" /> PAID & ACTIVATED
           </Badge>
         );
       case "awaiting_verification":
-      case "pending":
         return (
           <Badge variant="warning" size="sm" className="font-extrabold uppercase">
             <Clock className="w-3 h-3 mr-1" /> AWAITING VERIFICATION
@@ -65,7 +74,7 @@ export const OrdersPage: React.FC = () => {
       default:
         return (
           <Badge variant="secondary" size="sm" className="font-extrabold uppercase">
-            {status}
+            {order.status}
           </Badge>
         );
     }
@@ -76,6 +85,34 @@ export const OrdersPage: React.FC = () => {
       <div className="py-20 text-center space-y-3 max-w-xl mx-auto">
         <div className="w-10 h-10 border-4 border-[#0FA3A3] border-t-transparent rounded-full animate-spin mx-auto" />
         <p className="text-xs font-bold text-slate-500">Loading Orders & Official Invoices...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="py-20 text-center space-y-4 max-w-md mx-auto">
+        <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+          <AlertTriangle className="w-7 h-7" />
+        </div>
+        <p className="text-xs text-slate-500">{loadError}</p>
+        <Button variant="teal" size="md" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (orders.length === 0) {
+    return (
+      <div className="py-20 text-center space-y-4 max-w-md mx-auto">
+        <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+          <ShoppingBag className="w-7 h-7" />
+        </div>
+        <div className="space-y-1">
+          <h2 className="text-lg font-black text-[#0E2A47]">No Orders Yet</h2>
+          <p className="text-xs text-slate-500">You haven't placed any orders. Browse courses to get started.</p>
+        </div>
       </div>
     );
   }
@@ -99,7 +136,7 @@ export const OrdersPage: React.FC = () => {
       {/* Orders Table & Cards */}
       <div className="space-y-4">
         {orders.map((ord) => {
-          const isRejected = ord.status === ("rejected" as any) || ord.proof?.status === "rejected";
+          const isRejected = resolveOrderBadgeState(ord) === "rejected";
           const rejectReason = ord.proof?.rejectReason || "Verification check failed. Reference number mismatch.";
 
           return (
@@ -116,7 +153,7 @@ export const OrdersPage: React.FC = () => {
                   <h3 className="text-base font-black text-[#0E2A47]">{ord.courseTitle}</h3>
                 </div>
 
-                <div className="shrink-0">{getStatusBadge(ord.status, rejectReason)}</div>
+                <div className="shrink-0">{getStatusBadge(ord)}</div>
               </div>
 
               {/* Order Specs Grid */}
@@ -157,11 +194,29 @@ export const OrdersPage: React.FC = () => {
               )}
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-end flex-wrap gap-2 pt-2 border-t border-slate-100">
+                {ord.proof && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSelectedProofOrder(ord)}
+                    icon={<Eye className="w-3.5 h-3.5" />}
+                  >
+                    View Proof
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => setSelectedInvoiceOrder(ord)}
+                  icon={<FileText className="w-3.5 h-3.5" />}
+                >
+                  View Invoice
+                </Button>
+                <Button
+                  size="sm"
+                  variant="teal"
+                  onClick={() => handleDownloadRealInvoice(ord.id)}
                   icon={<Download className="w-3.5 h-3.5" />}
                 >
                   Download Invoice (PDF)
@@ -271,6 +326,56 @@ export const OrdersPage: React.FC = () => {
               </Button>
               <Button variant="teal" size="md" onClick={handlePrintInvoice} icon={<Printer className="w-4 h-4" />}>
                 Print Tax Receipt
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Payment Proof Viewer Modal — streams the REAL proof image bytes through the
+          authenticated GET /orders/:id/proof-image route (owner-only; same-origin httpOnly auth
+          cookies are sent automatically on a plain <img> request, mirroring how
+          ManualPaymentsPage.tsx, the admin equivalent, already renders row.proof.filePath
+          directly). */}
+      <Modal
+        isOpen={selectedProofOrder !== null}
+        onClose={() => setSelectedProofOrder(null)}
+        title="Payment Proof"
+      >
+        {selectedProofOrder?.proof && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
+              <div>
+                <span className="text-slate-500 block">Gateway & Amount</span>
+                <span className="font-bold text-[#0E2A47] text-sm uppercase">
+                  {selectedProofOrder.gateway} • {formatPKR(selectedProofOrder.finalAmount)}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-slate-500 block">Txn Reference No</span>
+                <span className="font-mono font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  {selectedProofOrder.proof.referenceNo || "N/A"}
+                </span>
+              </div>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-900 max-h-96 flex items-center justify-center p-2">
+              <img
+                src={selectedProofOrder.proof.filePath}
+                alt="Payment Proof"
+                className="max-h-88 max-w-full object-contain rounded-lg"
+              />
+            </div>
+
+            {selectedProofOrder.proof.status === "rejected" && selectedProofOrder.proof.rejectReason && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800">
+                <span className="font-black">Rejection Reason:</span> {selectedProofOrder.proof.rejectReason}
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={() => setSelectedProofOrder(null)}>
+                Close
               </Button>
             </div>
           </div>

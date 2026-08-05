@@ -44,8 +44,16 @@ describe('E2E: quote -> order -> mock pay -> enrollment active -> invoice PDF ->
 
     // 3. Follow the mock gateway's redirect back to our own return route —
     // exactly the same request shape a real browser bounce-back would make.
+    // Uses the ACTUAL returned redirectUrl's path+query verbatim (not a
+    // hardcoded '/api/v1/checkout/return/mock' guess) so this test would have
+    // caught the real missing-'/api/v1'-prefix bug a live browser hit
+    // (docs/07_EXECUTION_PLAN.md 9.7 live-verification find, DECISIONS.md
+    // 2026-08-05) — before this fix, redirectUrl's pathname was the WRONG
+    // '/checkout/return/mock' (no /api/v1), which 404s against the real
+    // mount (server/src/routes/v1/index.js), but this test's own hardcoded
+    // literal silently papered over that.
     const returnUrl = new URL(redirectUrl);
-    const returnRes = await agent.get(`/api/v1/checkout/return/mock${returnUrl.search}`);
+    const returnRes = await agent.get(`${returnUrl.pathname}${returnUrl.search}`);
     expect(returnRes.status).toBe(302);
     expect(returnRes.headers.location).toBe(`${env.APP_URL}/order/${order.id}/status`);
 

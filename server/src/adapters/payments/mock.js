@@ -55,7 +55,7 @@ const mockGateway = {
   /** See file header for the full design rationale. */
   async createCheckout(order) {
     const token = signMockToken(order.id);
-    const redirectUrl = `${env.APP_URL}/checkout/return/mock?orderId=${order.id}&token=${token}`;
+    const redirectUrl = `${env.APP_URL}/api/v1/checkout/return/mock?orderId=${order.id}&token=${token}`;
     return { redirectUrl };
   },
 

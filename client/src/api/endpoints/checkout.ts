@@ -1,7 +1,13 @@
 import { CONFIG } from "../../config";
-import { apiFetch, mockLatency, ApiError } from "../client";
+import { apiFetch, apiUpload, mockLatency, ApiError } from "../client";
 import { Order, PaymentGateway } from "../../types";
 import { MOCK_COURSES, MOCK_COUPONS, MOCK_ORDERS } from "../../mock-data";
+
+export interface GatewayInfo {
+  code: PaymentGateway;
+  name: string;
+  enabled: boolean;
+}
 
 export interface QuoteRequest {
   courseId: number;
@@ -25,7 +31,19 @@ export interface CreateOrderRequest {
 
 export interface CreateOrderResponse {
   order: Order;
+  /** Mock gateway shape — window.location-style redirect straight to our own return route. */
   redirectUrl?: string;
+  /**
+   * JazzCash/EasyPaisa hosted-checkout shape (server/src/adapters/payments/{jazzcash,easypaisa}.js
+   * `createCheckout()`): a signed form payload that must be rendered as a hidden-input HTML
+   * form (one `<input>` per `formFields` entry) and auto-submitted with `method="POST"` to
+   * `actionUrl` — the gateway's own hosted page, never a plain browser redirect (the payload,
+   * notably the secure hash, doesn't fit in a querystring).
+   */
+  actionUrl?: string;
+  method?: "POST";
+  formFields?: Record<string, string>;
+  /** Raast / bank_transfer manual pseudo-gateway shape. */
   manualDetails?: {
     raastId: string;
     iban: string;
@@ -36,6 +54,23 @@ export interface CreateOrderResponse {
 }
 
 export const checkoutApi = {
+  /** GET /checkout/gateways (docs/07_EXECUTION_PLAN.md 9.7) — real enabled/configured gateway list, replacing the previously-hardcoded gatewayConfigs array in CheckoutPage.tsx. */
+  async getGateways(): Promise<GatewayInfo[]> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      return [
+        { code: "jazzcash", name: "JazzCash", enabled: true },
+        { code: "easypaisa", name: "EasyPaisa", enabled: true },
+        { code: "raast", name: "Raast", enabled: true },
+        { code: "bank_transfer", name: "Bank Transfer", enabled: true },
+        { code: "payfast", name: "PayFast", enabled: false },
+        { code: "safepay", name: "Safepay", enabled: false },
+        { code: "mock", name: "Mock (Dev)", enabled: true },
+      ];
+    }
+    return apiFetch<GatewayInfo[]>("/checkout/gateways");
+  },
+
   async getQuote(req: QuoteRequest): Promise<QuoteResponse> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 300);
@@ -138,6 +173,24 @@ export const checkoutApi = {
       method: "POST",
       body: JSON.stringify(req),
     });
+  },
+
+  /**
+   * POST /checkout/uploads/proof-image (multipart `file` + `orderId` fields) — real proof-image
+   * upload, replacing CheckoutPage.tsx's previously-hardcoded Unsplash `fileUrl` stand-in.
+   * Follows admin.ts#uploadImage's exact apiUpload/FormData pattern, plus the `orderId` field
+   * this endpoint additionally requires (server/src/services/manualPaymentService.js links the
+   * upload to an order immediately, at upload time).
+   */
+  async uploadProofImage(orderId: number, file: File): Promise<{ url: string }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 500);
+      return { url: URL.createObjectURL(file) };
+    }
+    const form = new FormData();
+    form.append("file", file);
+    form.append("orderId", String(orderId));
+    return apiUpload<{ url: string }>("/checkout/uploads/proof-image", form);
   },
 
   async uploadBankProof(orderId: number, data: { referenceNo: string; note?: string; fileUrl: string }): Promise<Order> {

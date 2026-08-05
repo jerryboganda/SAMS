@@ -1,73 +1,137 @@
-import React, { useState, useEffect } from "react";
-import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
-  CheckCircle2,
   Clock,
   XCircle,
   Sparkles,
   ArrowRight,
   RotateCcw,
   FileText,
-  ShieldCheck,
-  Building2,
   AlertCircle,
 } from "lucide-react";
 import { Card, Button, Badge } from "../../components/ui";
 import { checkoutApi } from "../../api/endpoints/checkout";
 import { Order } from "../../types";
 import { formatPKR } from "../../utils/formatters";
+import { resolveDisplayStatus, shouldContinuePolling, FailedReason } from "./orderStatusResolution";
+
+// Poll GET /orders/:id every 2.5s, for up to ~60s (24 attempts), until the order reaches a
+// terminal status (docs/07_EXECUTION_PLAN.md 9.7 — replaces the previous fake
+// `setTimeout(2000)` "simulate polling"/dev-only status-toggle bar with REAL polling).
+const POLL_INTERVAL_MS = 2500;
+const MAX_POLL_ATTEMPTS = 24;
+
+const FAILED_COPY: Record<FailedReason, { title: string; body: string }> = {
+  failed: {
+    title: "Payment Processing Failed",
+    body: "We were unable to process your payment. Your account has not been charged.",
+  },
+  cancelled: {
+    title: "Order Cancelled",
+    body: "This order was cancelled. Your account has not been charged. You can start a new checkout at any time.",
+  },
+  refunded: {
+    title: "Order Refunded",
+    body: "This order was refunded. If you believe this is a mistake, please contact billing support.",
+  },
+  poll_timeout: {
+    title: "Still Processing Your Payment",
+    body: "Your payment is taking longer than usual to confirm — this doesn't necessarily mean it failed. Please check My Orders shortly, or contact support if this persists.",
+  },
+};
 
 export const OrderStatusPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const gatewayParam = searchParams.get("gateway") || "jazzcash";
-  const initialStatusParam = searchParams.get("status");
-
   const [order, setOrder] = useState<Order | null>(null);
-  const [isPolling, setIsPolling] = useState(true);
-  const [statusState, setStatusState] = useState<"pending" | "paid" | "awaiting_verification" | "failed">(
-    initialStatusParam === "awaiting_verification" ? "awaiting_verification" : "pending"
-  );
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [timedOut, setTimedOut] = useState(false);
+  const attemptRef = useRef(0);
 
   useEffect(() => {
-    let timer: any;
-    async function fetchOrder() {
-      try {
-        const ord = await checkoutApi.getOrderById(Number(id) || 101);
-        setOrder(ord);
+    let cancelled = false;
+    // Mutable holder (not the variable itself) so `intervalRef` can stay `const` — pollOnce's
+    // closure reads `intervalRef.current` lazily, by which point the interval below has always
+    // already been assigned (JS single-threaded ordering: the sync `setInterval(...)` line below
+    // always runs before this async function's first `await` resumes).
+    const intervalRef: { current?: ReturnType<typeof setInterval> } = {};
 
-        if (initialStatusParam === "awaiting_verification" || ord.gateway === "raast" || ord.gateway === "bank_transfer") {
-          setIsPolling(false);
-          setStatusState("awaiting_verification");
-        } else {
-          // Simulate 2s gateway IPN/status callback polling
-          setIsPolling(true);
-          timer = setTimeout(() => {
-            setIsPolling(false);
-            setStatusState("paid");
-          }, 2000);
+    async function pollOnce() {
+      try {
+        const ord = await checkoutApi.getOrderById(Number(id));
+        if (cancelled) return;
+        setOrder(ord);
+        setLoadError("");
+        setIsLoading(false);
+
+        attemptRef.current += 1;
+        if (!shouldContinuePolling(ord.status, attemptRef.current, MAX_POLL_ATTEMPTS)) {
+          if (ord.status === "pending" && attemptRef.current >= MAX_POLL_ATTEMPTS) {
+            setTimedOut(true);
+          }
+          if (intervalRef.current) clearInterval(intervalRef.current);
         }
-      } catch (err) {
-        setIsPolling(false);
-        setStatusState("failed");
+      } catch (err: any) {
+        if (cancelled) return;
+        setIsLoading(false);
+        setLoadError(err.message || "Unable to load order status.");
+        if (intervalRef.current) clearInterval(intervalRef.current);
       }
     }
 
-    fetchOrder();
+    pollOnce();
+    intervalRef.current = setInterval(pollOnce, POLL_INTERVAL_MS);
 
-    return () => clearTimeout(timer);
-  }, [id, initialStatusParam]);
+    return () => {
+      cancelled = true;
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [id]);
 
-  if (isPolling) {
+  if (isLoading) {
+    return (
+      <div className="py-20 text-center space-y-4 max-w-md mx-auto">
+        <div className="w-12 h-12 border-4 border-[#0FA3A3] border-t-transparent rounded-full animate-spin mx-auto" />
+        <div className="space-y-1">
+          <h2 className="text-lg font-black text-[#0E2A47]">Loading Order Status...</h2>
+          <p className="text-xs text-slate-500">Please wait while we fetch your order.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError && !order) {
+    return (
+      <div className="py-20 text-center space-y-4 max-w-md mx-auto">
+        <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-7 h-7" />
+        </div>
+        <div className="space-y-1">
+          <h2 className="text-lg font-black text-[#0E2A47]">Unable to Load Order</h2>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto">{loadError}</p>
+        </div>
+        <Link to="/app/orders">
+          <Button variant="teal" size="md">
+            Go to My Orders
+          </Button>
+        </Link>
+      </div>
+    );
+  }
+
+  const { display: statusState, failedReason } = resolveDisplayStatus(order, { timedOut });
+  const isStillPolling = statusState === "pending";
+
+  if (isStillPolling) {
     return (
       <div className="py-20 text-center space-y-4 max-w-md mx-auto">
         <div className="w-12 h-12 border-4 border-[#0FA3A3] border-t-transparent rounded-full animate-spin mx-auto" />
         <div className="space-y-1">
           <h2 className="text-lg font-black text-[#0E2A47]">Verifying Gateway Payment...</h2>
           <p className="text-xs text-slate-500">
-            Please wait while we confirm your transaction with {gatewayParam.toUpperCase()}...
+            Please wait while we confirm your transaction with {order?.gateway?.toUpperCase() || "the gateway"}...
           </p>
         </div>
       </div>
@@ -76,42 +140,6 @@ export const OrderStatusPage: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-12 max-w-2xl mx-auto pt-6">
-      {/* Simulation Toggle Bar for Testing both Success & Failed Paths */}
-      <div className="p-3 bg-slate-100 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-        <span className="font-bold text-slate-600">Gateway Test Control:</span>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setStatusState("paid")}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${
-              statusState === "paid" ? "bg-emerald-600 text-white" : "bg-white text-slate-700 hover:bg-slate-200"
-            }`}
-          >
-            Simulate Paid 🎉
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusState("awaiting_verification")}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${
-              statusState === "awaiting_verification"
-                ? "bg-amber-600 text-white"
-                : "bg-white text-slate-700 hover:bg-slate-200"
-            }`}
-          >
-            Simulate Verification ⏳
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusState("failed")}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${
-              statusState === "failed" ? "bg-rose-600 text-white" : "bg-white text-slate-700 hover:bg-slate-200"
-            }`}
-          >
-            Simulate Failed ❌
-          </button>
-        </div>
-      </div>
-
       {/* SUCCESS STATE (PAID) */}
       {statusState === "paid" && (
         <Card className="p-8 border-emerald-300 bg-gradient-to-b from-emerald-50/80 via-white to-white rounded-3xl shadow-xl text-center space-y-6 relative overflow-hidden">
@@ -132,20 +160,16 @@ export const OrderStatusPage: React.FC = () => {
           {/* Order Snapshot Box */}
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-left space-y-2.5">
             <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 font-bold text-[#0E2A47]">
-              <span>Invoice Ref: {order?.invoiceNo || `SAMS-2026-${id || "1001"}`}</span>
-              <span className="text-emerald-700 uppercase font-black">{order?.gateway || gatewayParam}</span>
+              <span>Invoice Ref: {order?.invoiceNo || `#${id}`}</span>
+              <span className="text-emerald-700 uppercase font-black">{order?.gateway}</span>
             </div>
             <div className="flex justify-between text-slate-600">
               <span>Activated Package:</span>
-              <span className="font-bold text-slate-900">{order?.courseTitle || "NRE Step 1 Complete Course"}</span>
+              <span className="font-bold text-slate-900">{order?.courseTitle}</span>
             </div>
             <div className="flex justify-between text-slate-600">
               <span>Amount Paid:</span>
-              <span className="font-black text-[#0E2A47]">{formatPKR(order?.finalAmount || 15000)}</span>
-            </div>
-            <div className="flex justify-between text-slate-600">
-              <span>Access Validity:</span>
-              <span className="font-bold text-slate-900">180 Days Unlimited</span>
+              <span className="font-black text-[#0E2A47]">{formatPKR(order?.finalAmount || 0)}</span>
             </div>
           </div>
 
@@ -187,11 +211,11 @@ export const OrderStatusPage: React.FC = () => {
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-left space-y-2">
             <div className="flex justify-between">
               <span className="text-slate-500">Invoice Reference:</span>
-              <span className="font-mono font-bold text-[#0E2A47]">{order?.invoiceNo || `SAMS-2026-${id || "1001"}`}</span>
+              <span className="font-mono font-bold text-[#0E2A47]">{order?.invoiceNo || `#${id}`}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Method Used:</span>
-              <span className="font-bold text-slate-800 uppercase">{order?.gateway || gatewayParam}</span>
+              <span className="font-bold text-slate-800 uppercase">{order?.gateway}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Verification Status:</span>
@@ -214,7 +238,8 @@ export const OrderStatusPage: React.FC = () => {
         </Card>
       )}
 
-      {/* FAILED STATE */}
+      {/* FAILED / CANCELLED / REFUNDED / STILL-PENDING-TIMED-OUT STATE (shares one card shape;
+          copy varies by failedReason so a slow-pending order is never told it "failed") */}
       {statusState === "failed" && (
         <Card className="p-8 border-rose-300 bg-gradient-to-b from-rose-50/80 via-white to-white rounded-3xl shadow-xl text-center space-y-6">
           <div className="w-16 h-16 rounded-3xl bg-rose-600 text-white flex items-center justify-center mx-auto shadow-lg shadow-rose-200">
@@ -223,31 +248,30 @@ export const OrderStatusPage: React.FC = () => {
 
           <div className="space-y-2">
             <Badge variant="danger" size="lg" className="font-extrabold uppercase tracking-wide">
-              Transaction Unsuccessful
+              {failedReason === "poll_timeout" ? "Verification In Progress" : "Transaction Unsuccessful"}
             </Badge>
-            <h1 className="text-2xl font-black text-[#0E2A47]">Payment Processing Failed</h1>
+            <h1 className="text-2xl font-black text-[#0E2A47]">
+              {FAILED_COPY[failedReason || "failed"].title}
+            </h1>
             <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
-              We were unable to process your payment via {gatewayParam.toUpperCase()}. Your account has not been charged.
+              {FAILED_COPY[failedReason || "failed"].body}
             </p>
           </div>
 
-          <div className="p-4 bg-rose-50 rounded-2xl border border-rose-200 text-xs text-left space-y-1.5 text-rose-900">
-            <div className="font-bold flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600" /> Common Failure Causes:
-            </div>
-            <ul className="list-disc list-inside text-[11px] text-rose-800 space-y-1">
-              <li>Insufficient mobile wallet or bank balance</li>
-              <li>OTP authentication timeout or invalid PIN entry</li>
-              <li>Temporary gateway API connection drop</li>
-            </ul>
-          </div>
-
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-            <button type="button" onClick={() => navigate(-1)} className="w-full sm:w-auto">
-              <Button variant="teal" size="lg" className="w-full" icon={<RotateCcw className="w-4 h-4" />}>
-                Retry Checkout
-              </Button>
-            </button>
+            {failedReason === "poll_timeout" ? (
+              <Link to="/app/orders" className="w-full sm:w-auto">
+                <Button variant="teal" size="lg" className="w-full" icon={<FileText className="w-4 h-4" />}>
+                  Check My Orders
+                </Button>
+              </Link>
+            ) : (
+              <button type="button" onClick={() => navigate(-1)} className="w-full sm:w-auto">
+                <Button variant="teal" size="lg" className="w-full" icon={<RotateCcw className="w-4 h-4" />}>
+                  Retry Checkout
+                </Button>
+              </button>
+            )}
             <Link to="/contact" className="w-full sm:w-auto">
               <Button variant="outline" size="lg" className="w-full">
                 Contact Billing Support

@@ -68,8 +68,9 @@ Conventions: JSON only. Envelope `{success:true,data}` / `{success:false,error:{
 ## 5. Checkout & orders (student)
 | Method Path | Role | Notes |
 |---|---|---|
+| GET `/checkout/gateways` | S | `{code, name, enabled}[]` for every known gateway code (`jazzcash\|easypaisa\|raast\|payfast\|safepay\|bank_transfer\|mock`); `enabled` reuses `adapters/payments/index.js#isGatewayAvailable` — added Phase 9.7, see DECISIONS.md 2026-08-05 |
 | POST `/checkout/quote` | S | {courseId, couponCode?} → price, discount, final (server-computed; coupon errors: `COUPON_INVALID/EXPIRED/EXHAUSTED/NOT_APPLICABLE`) |
-| POST `/checkout/orders` | S | {courseId, couponCode?, gateway: jazzcash\|easypaisa\|raast\|payfast\|safepay\|bank_transfer} → order `pending` + `createCheckout()` result: `{redirectUrl}` (hosted checkout) or `{manualDetails, orderId}` (bank_transfer: account details / raast: Raast ID + IBAN + QR image URL). `409 ALREADY_ENROLLED`; `422 GATEWAY_NOT_CONFIGURED` for disabled/placeholder gateways |
+| POST `/checkout/orders` | S | {courseId, couponCode?, gateway: jazzcash\|easypaisa\|raast\|payfast\|safepay\|bank_transfer} → order `pending` + `createCheckout()` result: `{redirectUrl}` (mock), `{actionUrl, method:'POST', formFields}` (jazzcash/easypaisa hosted-checkout form-POST), or `{manualDetails, orderId}` (bank_transfer: account details / raast: Raast ID + IBAN + QR image URL). `409 ALREADY_ENROLLED`; `422 GATEWAY_NOT_CONFIGURED` for disabled/placeholder gateways |
 | POST `/checkout/orders/:id/bank-proof` | S | multipart image + referenceNo → status `awaiting_verification` |
 | GET `/orders` · GET `/orders/:id` | S | my orders / detail+status polling |
 | GET `/orders/:id/invoice.pdf` | S | streamed PDF (owner or admin only) |

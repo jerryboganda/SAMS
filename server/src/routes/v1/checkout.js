@@ -1,5 +1,6 @@
 // server/src/routes/v1/checkout.js
-// Mounts POST /checkout/quote, POST /checkout/orders (role S),
+// Mounts GET /checkout/gateways (role S, docs/07_EXECUTION_PLAN.md 9.7),
+// POST /checkout/quote, POST /checkout/orders (role S),
 // GET /checkout/return/:gateway (role P — browser payment-gateway return
 // URL, never behind auth), and (docs/07_EXECUTION_PLAN.md 9.5/9.6)
 // POST /checkout/uploads/proof-image + POST /checkout/orders/:id/bank-proof
@@ -17,6 +18,9 @@ import * as manualPaymentController from '../../controllers/manualPaymentControl
 const router = Router();
 const requireStudent = [auth, deviceCheck, requireRole('student')];
 
+// docs/07_EXECUTION_PLAN.md 9.7 — real gateway-availability listing, replacing
+// the checkout page's previously-hardcoded gateway config array.
+router.get('/gateways', ...requireStudent, checkoutController.listGateways);
 router.post('/quote', ...requireStudent, checkoutController.quote);
 router.post('/orders', ...requireStudent, checkoutController.createOrder);
 router.get('/return/:gateway', checkoutController.handleReturn);

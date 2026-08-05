@@ -6,6 +6,26 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { validateBody } from '../utils/validate.js';
 import { env } from '../config/env.js';
 import * as orderService from '../services/orderService.js';
+import { isGatewayAvailable } from '../adapters/payments/index.js';
+
+// Every gateway CODE this deployment could ever route a checkout to (mirrors
+// `DRIVERS` in adapters/payments/index.js) — used only to build the
+// GET /checkout/gateways listing below, never to bypass
+// isGatewayAvailable()'s own enabled+configured gate.
+const ALL_GATEWAY_CODES = ['jazzcash', 'easypaisa', 'raast', 'payfast', 'safepay', 'bank_transfer', 'mock'];
+
+// Human-readable labels for the gateway picker UI — purely cosmetic, kept
+// here (not in the adapter layer) since adapters/payments/index.js is a
+// backend-only factory with no UI-facing concerns (docs/02_ARCHITECTURE.md §7).
+const GATEWAY_NAMES = {
+  jazzcash: 'JazzCash',
+  easypaisa: 'EasyPaisa',
+  raast: 'Raast',
+  payfast: 'PayFast',
+  safepay: 'Safepay',
+  bank_transfer: 'Bank Transfer',
+  mock: 'Mock (Dev)',
+};
 
 // --- Schemas -----------------------------------------------------------
 
@@ -41,6 +61,23 @@ export const quote = asyncHandler(async (req, res) => {
   ok(res, data);
 });
 
+/**
+ * GET /checkout/gateways (role S, docs/07_EXECUTION_PLAN.md 9.7 — new,
+ * genuinely undocumented-until-now endpoint; see DECISIONS.md 2026-08-05 and
+ * docs/04_API_SPEC.md §5). Replaces CheckoutPage.tsx's previously-hardcoded
+ * `gatewayConfigs` array with the REAL enabled/configured state, reusing
+ * `isGatewayAvailable()` from adapters/payments/index.js directly — no new
+ * service, this is a thin one-liner-per-code list comprehension.
+ */
+export const listGateways = asyncHandler(async (req, res) => {
+  const data = ALL_GATEWAY_CODES.map((code) => ({
+    code,
+    name: GATEWAY_NAMES[code] ?? code,
+    enabled: isGatewayAvailable(code),
+  }));
+  ok(res, data);
+});
+
 export const createOrder = asyncHandler(async (req, res) => {
   const body = validateBody(createOrderSchema, req.body);
   const data = await orderService.createOrder({
@@ -69,4 +106,4 @@ export const handleReturn = asyncHandler(async (req, res) => {
   res.redirect(`${env.APP_URL}${target}`);
 });
 
-export default { quote, createOrder, handleReturn };
+export default { listGateways, quote, createOrder, handleReturn };
