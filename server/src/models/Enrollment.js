@@ -47,6 +47,18 @@ export default (sequelize) => {
       allowNull: false,
       defaultValue: 'active',
     },
+    // Dedup marker for the 9.9 7-day-expiring reminder sweep
+    // (services/enrollmentLifecycleService.js#sendExpiringReminders) — set
+    // the moment a reminder is sent so a later daily sweep never re-sends it.
+    // Note: `active_slot` (the generated column backing the corrected
+    // `uq_enr_active` unique index — see migration
+    // 20260101000035-fix-enrollment-active-unique-and-reminder-column.cjs)
+    // is DELIBERATELY not declared here: it's a DB-computed VIRTUAL column,
+    // never written to directly, so Sequelize never needs to know about it.
+    expiryReminderSentAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     },
     {
       sequelize,

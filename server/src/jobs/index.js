@@ -7,10 +7,12 @@
 // further to await here.
 import { registerQuestionDifficultyCron } from './questionDifficultyCron.js';
 import { registerStatsReconciliationCron } from './statsReconciliationCron.js';
+import { registerEnrollmentLifecycleCron } from './enrollmentLifecycleCron.js';
 
 export function registerCronJobs() {
   registerQuestionDifficultyCron();
   registerStatsReconciliationCron();
+  registerEnrollmentLifecycleCron();
 }
 
 export default registerCronJobs;

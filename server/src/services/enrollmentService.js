@@ -3,8 +3,8 @@
 // "create an active enrollment from a paid order" piece the shared
 // payment-success path needs. The full enrollment LIFECYCLE (daily expiry
 // cron that flips `status: 'active' -> 'expired'`, 7-day-expiring reminder
-// notifications) is a SEPARATE follow-up task (9.9), not built here — see
-// CLAUDE.md's task brief for this phase.
+// notifications) is built separately in services/enrollmentLifecycleService.js
+// (Phase 9.9) — see that file's header.
 import db from '../models/index.js';
 
 const { Enrollment } = db;
@@ -18,19 +18,38 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * orderService.js's completeOrderPayment — already holds the order row lock
  * for this same transaction).
  *
- * `enrollments` enforces `UNIQUE (user_id, course_id, status)` — at most one
- * `status='active'` row per (user, course) at a time
- * (docs/03_DATABASE_SCHEMA.md). orderService's ALREADY_ENROLLED gate already
- * refuses to create a new ORDER for a course the user is CURRENTLY
- * (date-unexpired) actively enrolled in, so the only way a `status='active'`
- * row can still be sitting here for this (user, course) pair is a past
- * enrollment whose `expires_at` has already passed but whose `status` column
- * hasn't been flipped to `'expired'` yet — that flip is normally the daily
- * 9.9 cron's job, which doesn't exist yet. Repurchasing a course after its
- * enrollment has expired must still work today, so this function narrowly
- * (NOT a general lifecycle implementation — just enough to not violate the
- * unique constraint on a legitimate repurchase) flips that specific stale
- * row to `'expired'` first. See DECISIONS.md 2026-08-01.
+ * `enrollments` enforces `UNIQUE (user_id, course_id, active_slot)`, where
+ * `active_slot` is a generated column that's non-NULL (`1`) only when
+ * `status='active'` — i.e. at most one `status='active'` row per
+ * (user, course) at a time, while any number of historical `expired`/
+ * `revoked` rows for the same pair are allowed (docs/03_DATABASE_SCHEMA.md;
+ * migration 20260101000035-fix-enrollment-active-unique-and-reminder-column.cjs
+ * fixed this from an originally-too-strict plain `UNIQUE(user_id, course_id,
+ * status)` that could only ever tolerate ONE repurchase-after-expiry cycle
+ * per (user, course) — see DECISIONS.md 2026-08-05 for the full writeup).
+ * orderService's ALREADY_ENROLLED gate already refuses to create a new ORDER
+ * for a course the user is CURRENTLY (date-unexpired) actively enrolled in,
+ * so the only way a `status='active'` row can still be sitting here for this
+ * (user, course) pair is a past enrollment whose `expires_at` has already
+ * passed but whose `status` column hasn't been flipped to `'expired'` yet —
+ * normally jobs/enrollmentLifecycleCron.js's nightly job, or a small window
+ * before it next runs. Repurchasing a course after its enrollment has
+ * expired must still work immediately (not just after the next cron run),
+ * so this function narrowly (NOT a general lifecycle implementation — just
+ * enough to not violate the unique constraint on a legitimate repurchase)
+ * flips that specific stale row to `'expired'` first.
+ *
+ * Concurrent-double-purchase race: if the caller (orderService.js's
+ * completeOrderPayment) is racing ANOTHER in-flight completion for the same
+ * (user, course) — two separate pending orders for the same course, both
+ * completing payment nearly simultaneously — the `Enrollment.create()` below
+ * can lose a race to the unique index and throw
+ * `SequelizeUniqueConstraintError`. This function deliberately does NOT
+ * catch that itself — see orderService.js#completeOrderPayment's own doc
+ * comment for where and why that specific race is caught (this function
+ * stays a simple, honest "create or throw" building block; the
+ * race-tolerance policy decision belongs to the caller that knows about the
+ * order/payment/coupon side effects around it).
  */
 export async function createEnrollmentFromOrder({ order, course, transaction }) {
   const now = new Date();

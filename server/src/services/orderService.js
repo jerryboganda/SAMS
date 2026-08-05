@@ -428,14 +428,78 @@ async function finalizeSuccessfulOrder(order, course) {
  * NOT enrolled — see processGatewayCallback's catch for how this surfaces to
  * the caller without ever crashing a webhook/return route).
  *
+ * Concurrent-double-purchase race safety (docs/07_EXECUTION_PLAN.md 9.9):
+ * unlike the coupon race above, TWO DIFFERENT orders for the SAME (user,
+ * course) each lock their OWN order row, so nothing here serializes them
+ * against each other — both can reach `enrollmentService.createEnrollmentFromOrder`
+ * concurrently. The SECOND one to actually insert its `enrollments` row
+ * loses to `uq_enr_active` (`SequelizeUniqueConstraintError`), which is
+ * caught inline (NOT rethrown, NOT rolled back — MySQL/InnoDB, unlike
+ * Postgres, does not abort an entire transaction over one duplicate-key
+ * error): that order is still marked `'paid'` (the payment is real) and
+ * `duplicateEnrollmentRace: true` is returned with `enrollment: null` — no
+ * duplicate active enrollment is created; the one the winning order already
+ * created grants full access either way.
+ *
+ * Under heavier real contention (confirmed empirically while building this
+ * task's own concurrency test — a real HTTP `Promise.all` race sometimes
+ * produces this instead of a clean duplicate-key rejection), the two
+ * transactions can instead hit a genuine InnoDB DEADLOCK
+ * (`ER_LOCK_DEADLOCK`) on this same `enrollments` write, since the earlier
+ * `Enrollment.update(... WHERE status='active')` flip-check is itself a
+ * locking scan, not a plain snapshot read. Unlike a duplicate-key error, a
+ * deadlock is NOT something the losing side can catch-and-continue-in-place
+ * — InnoDB has already force-rolled-back that entire transaction server-side
+ * by the time the error reaches this code (this is a genuine MySQL
+ * difference from the duplicate-key case above). So `completeOrderPayment`
+ * retries the WHOLE transaction once on a detected deadlock
+ * (`runPaymentTransaction`'s `attempt` param) — by the time the retry
+ * re-locks the order row and re-runs, the winning side's transaction has
+ * long since committed, so the retry deterministically lands on the
+ * ordinary duplicate-key path above instead of racing again. See
+ * DECISIONS.md 2026-08-05 for the full writeup + the alternative (extend
+ * the existing enrollment's expiry) considered and rejected.
+ *
  * @param {object} params
  * @param {import('../models/Order.js').default} params.order - the order row (may be stale; re-fetched+locked inside the transaction)
  * @param {string} params.gateway - gateway code, e.g. 'mock' | 'jazzcash' | ...
  * @param {string|null} [params.externalRef] - the gateway's own transaction/reference id, stored onto `orders.gateway_ref`
- * @returns {Promise<{order: import('../models/Order.js').default, enrollment?: object, course?: object, alreadyProcessed: boolean}>}
+ * @returns {Promise<{order: import('../models/Order.js').default, enrollment?: object|null, course?: object, alreadyProcessed: boolean, duplicateEnrollmentRace?: boolean}>}
  */
-export async function completeOrderPayment({ order, gateway: _gateway, externalRef }) {
-  const txResult = await sequelize.transaction(async (transaction) => {
+const MAX_DEADLOCK_RETRY_ATTEMPTS = 3;
+
+function isDeadlockError(err) {
+  return err?.name === 'SequelizeDatabaseError' && err?.parent?.code === 'ER_LOCK_DEADLOCK';
+}
+
+export async function completeOrderPayment({ order, gateway: _gateway, externalRef }, attempt = 1) {
+  let txResult;
+  try {
+    txResult = await runPaymentTransaction({ order, externalRef });
+  } catch (err) {
+    if (isDeadlockError(err) && attempt < MAX_DEADLOCK_RETRY_ATTEMPTS) {
+      logger.warn(
+        `[orders] completeOrderPayment deadlocked on order ${order.id} (attempt ${attempt}/${MAX_DEADLOCK_RETRY_ATTEMPTS}) -- retrying; ` +
+          `the winning side of this race should have committed by the retry.`
+      );
+      return completeOrderPayment({ order, gateway: _gateway, externalRef }, attempt + 1);
+    }
+    throw err;
+  }
+
+  if (!txResult.alreadyProcessed) {
+    try {
+      await finalizeSuccessfulOrder(txResult.order, txResult.course);
+    } catch (err) {
+      logger.error(`[orders] post-payment finalize (invoice/email/notification) failed for order ${txResult.order.id}: ${err.message}`);
+    }
+  }
+
+  return txResult;
+}
+
+async function runPaymentTransaction({ order, externalRef }) {
+  return sequelize.transaction(async (transaction) => {
     const lockedOrder = await Order.findByPk(order.id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!lockedOrder) {
       throw new ApiError(404, 'NOT_FOUND', 'Order not found.');
@@ -468,20 +532,43 @@ export async function completeOrderPayment({ order, gateway: _gateway, externalR
     }
 
     const course = await Course.findByPk(lockedOrder.courseId, { transaction });
-    const enrollment = await enrollmentService.createEnrollmentFromOrder({ order: lockedOrder, course, transaction });
 
-    return { order: lockedOrder, enrollment, course, alreadyProcessed: false };
-  });
-
-  if (!txResult.alreadyProcessed) {
+    // Concurrent-double-purchase race (docs/07_EXECUTION_PLAN.md 9.9 AC):
+    // two separate pending orders for the SAME (user, course) can both reach
+    // this point nearly simultaneously (two browser tabs, two near-
+    // simultaneous gateway redirects/webhooks, ...) -- each locks its OWN
+    // order row above, so nothing serializes them against each other until
+    // this exact INSERT collides on `enrollments.uq_enr_active`
+    // (user_id, course_id, active_slot) below. MySQL/InnoDB does NOT abort
+    // the whole transaction on a duplicate-key error the way Postgres does
+    // -- the error is caught, everything already staged in THIS transaction
+    // (order.status='paid', the coupon increment above) still commits
+    // normally. The student's payment is real either way, so the order is
+    // marked paid regardless of which side of this race it's on; only the
+    // SECOND order to arrive skips creating a (would-be duplicate) active
+    // enrollment, since a genuinely active one for this (user, course) was
+    // just created by the order that won the race an instant earlier. See
+    // DECISIONS.md 2026-08-05 for the full writeup + the alternative
+    // (extend the existing enrollment's expiry) considered and rejected.
+    let enrollment = null;
+    let duplicateEnrollmentRace = false;
     try {
-      await finalizeSuccessfulOrder(txResult.order, txResult.course);
+      enrollment = await enrollmentService.createEnrollmentFromOrder({ order: lockedOrder, course, transaction });
     } catch (err) {
-      logger.error(`[orders] post-payment finalize (invoice/email/notification) failed for order ${txResult.order.id}: ${err.message}`);
+      if (err?.name === 'SequelizeUniqueConstraintError') {
+        duplicateEnrollmentRace = true;
+        logger.warn(
+          `[orders] duplicate-enrollment race on order ${lockedOrder.id} (user ${lockedOrder.userId}, course ${lockedOrder.courseId}): ` +
+            `an active enrollment for this (user, course) was already created by a concurrently-completing order an instant earlier. ` +
+            `Order ${lockedOrder.id} is still marked paid; no duplicate active enrollment was created -- the existing one already grants full access.`
+        );
+      } else {
+        throw err;
+      }
     }
-  }
 
-  return txResult;
+    return { order: lockedOrder, enrollment, course, alreadyProcessed: false, duplicateEnrollmentRace };
+  });
 }
 
 /**

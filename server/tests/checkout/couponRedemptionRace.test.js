@@ -73,3 +73,48 @@ describe('Concurrent successful payments racing to redeem a max_uses=1 coupon', 
     expect(enrollments.length).toBe(1); // only the winner got enrolled
   }, 30000);
 });
+
+// Phase 9.9 addition: the test above only exercises two DIFFERENT users
+// racing a shared coupon. A genuinely uncovered gap identified during 9.9's
+// planning (see DECISIONS.md 2026-08-05) is the SAME user racing a shared
+// coupon across two of THEIR OWN pending orders (different courses, so this
+// stays isolated from the separate enrollment-uniqueness race covered by
+// tests/checkout/duplicatePurchaseRace.test.js) -- proving the coupon
+// row-lock re-check is keyed purely on the coupon row itself, never on
+// per-user state that could accidentally let one user's own two orders both
+// slip through.
+describe('Concurrent successful payments, SAME user, racing a max_uses=1 coupon across two of their own different pending orders', () => {
+  test('exactly one of the user\'s own two orders is completed; the coupon is redeemed exactly once', async () => {
+    const coupon = await createCoupon({ type: 'fixed', value: 500, courseId: null, maxUses: 1, usedCount: 0 });
+
+    const email = uniqueEmail('coupon-race-same-user');
+    await createVerifiedUser({ email });
+    const { agent } = await loginNewDeviceAndReverify(app, { email, password: DEFAULT_TEST_PASSWORD, userAgent: 'jest-coupon-race-same-user' });
+    const courseA = await createCourse({ price: 5000 });
+    const courseB = await createCourse({ price: 5000 });
+
+    const orderResA = await agent.post('/api/v1/checkout/orders').send({ courseId: courseA.id, couponCode: coupon.code, gateway: 'mock' });
+    const orderResB = await agent.post('/api/v1/checkout/orders').send({ courseId: courseB.id, couponCode: coupon.code, gateway: 'mock' });
+    expect(orderResA.status).toBe(201);
+    expect(orderResB.status).toBe(201);
+
+    const returnPathA = `/api/v1/checkout/return/mock${new URL(orderResA.body.data.redirectUrl).search}`;
+    const returnPathB = `/api/v1/checkout/return/mock${new URL(orderResB.body.data.redirectUrl).search}`;
+
+    const [resA, resB] = await Promise.all([request(app).get(returnPathA), request(app).get(returnPathB)]);
+    expect(resA.status).toBe(302);
+    expect(resB.status).toBe(302);
+
+    const [finalOrderA, finalOrderB] = await Promise.all([Order.findByPk(orderResA.body.data.order.id), Order.findByPk(orderResB.body.data.order.id)]);
+    const statuses = [finalOrderA.status, finalOrderB.status];
+
+    expect(statuses.filter((s) => s === 'paid').length).toBe(1);
+    expect(statuses.filter((s) => s === 'pending').length).toBe(1);
+
+    const reloadedCoupon = await Coupon.findByPk(coupon.id);
+    expect(reloadedCoupon.usedCount).toBe(1);
+
+    const enrollments = await Enrollment.findAll({ where: { orderId: [finalOrderA.id, finalOrderB.id] } });
+    expect(enrollments.length).toBe(1);
+  }, 30000);
+});

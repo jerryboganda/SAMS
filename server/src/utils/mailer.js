@@ -115,6 +115,18 @@ export function contactMessageAdminAlertTemplate({ adminEmail, name, email, subj
   };
 }
 
+export function enrollmentExpiringReminderTemplate({ user, courseTitle, daysRemaining, expiryDateStr }) {
+  const dayWord = daysRemaining === 1 ? 'day' : 'days';
+  return {
+    to: user.email,
+    subject: `Your access to "${courseTitle}" expires in ${daysRemaining} ${dayWord}`,
+    text:
+      `Hi ${user.name},\n\n` +
+      `Your enrollment in "${courseTitle}" will expire in ${daysRemaining} ${dayWord}, on ${expiryDateStr}.\n\n` +
+      `Renew your access from your Orders page before it expires to keep watching course videos and using the QBank.`,
+  };
+}
+
 export function passwordChangedTemplate({ user }) {
   return {
     to: user.email,

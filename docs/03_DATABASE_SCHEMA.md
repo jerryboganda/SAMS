@@ -202,8 +202,10 @@ CREATE TABLE enrollments (
   source ENUM('purchase','manual') NOT NULL DEFAULT 'purchase',
   starts_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
   status ENUM('active','expired','revoked') NOT NULL DEFAULT 'active',
+  active_slot TINYINT GENERATED ALWAYS AS (IF(status = 'active', 1, NULL)) VIRTUAL NULL, -- MySQL has no partial/filtered unique index; this generated column (non-NULL only when status='active') is the standard workaround so uq_enr_active can enforce "at most one ACTIVE row per (user,course)" while allowing unlimited historical expired/revoked rows for the same pair (NULLs are never considered equal in a unique index) -- see migration 20260101000035 + DECISIONS.md 2026-08-05
+  expiry_reminder_sent_at DATETIME NULL,                  -- set once the 7-day-expiring reminder has been sent for this enrollment, so the daily cron sweep never double-sends it
   created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
-  UNIQUE KEY uq_enr_active (user_id, course_id, status),   -- one active per course
+  UNIQUE KEY uq_enr_active (user_id, course_id, active_slot),   -- at most one ACTIVE row per (user, course); unlimited expired/revoked history rows allowed
   INDEX idx_enr_expiry (status, expires_at),
   CONSTRAINT fk_e_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_e_course FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
