@@ -119,4 +119,25 @@ if (env.NODE_ENV !== 'test') {
   }
 }
 
+// `mock` (adapters/payments/mock.js) is a deliberately zero-credential,
+// always-auto-succeeds gateway — exactly what dev/test needs, and exactly
+// what must never be reachable in production: any student could select
+// gateway:'mock' via POST /checkout/orders and get any course for free,
+// with no forgery required since the driver is *designed* to always
+// succeed. Phase 9.10 security audit finding M-2 — unlike the insecure-
+// default warnings above (fine to leave as warnings even in dev), this one
+// only fires for NODE_ENV==='production' specifically, since 'mock' being
+// enabled is the CORRECT, desired default everywhere else. Warn loudly
+// rather than hard-crash the process: an operator might have intentionally
+// scripted a mixed real+mock config for a controlled pilot, and refusing
+// to boot at all would be a worse failure mode than a loud warning for a
+// single-process Hostinger deployment with no separate staging tier.
+if (env.NODE_ENV === 'production' && env.PAYMENTS_ENABLED_GATEWAYS.split(',').map((s) => s.trim()).includes('mock')) {
+  console.warn(
+    '[env] WARNING: PAYMENTS_ENABLED_GATEWAYS includes "mock" while NODE_ENV=production. ' +
+      'The mock gateway always auto-succeeds with zero payment verification — any student can get ' +
+      'any course for free. Remove "mock" from PAYMENTS_ENABLED_GATEWAYS before going live.'
+  );
+}
+
 export default env;
