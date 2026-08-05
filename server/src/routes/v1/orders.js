@@ -17,5 +17,10 @@ const requireOwnerOrAdmin = [auth, deviceCheck, requireRole('student', 'admin')]
 router.get('/', ...requireStudent, ordersController.listMyOrders);
 router.get('/:id', ...requireOwnerOrAdmin, ordersController.getOrder);
 router.get('/:id/invoice.pdf', ...requireOwnerOrAdmin, ordersController.downloadInvoice);
+// docs/07_EXECUTION_PLAN.md 9.5/9.6 — the bank_transfer/raast payment-proof
+// image, streamed only through this authenticated owner-or-admin route (see
+// services/manualPaymentService.js's header for the full private-storage
+// design).
+router.get('/:id/proof-image', ...requireOwnerOrAdmin, ordersController.getProofImage);
 
 export default router;

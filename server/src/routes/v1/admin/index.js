@@ -17,6 +17,7 @@ import faqsRouter from './faqs.js';
 import messagesRouter from './messages.js';
 import settingsRouter from './settings.js';
 import mockExamsRouter from './mockExams.js';
+import bankTransfersRouter from './bankTransfers.js';
 
 const router = Router();
 
@@ -29,5 +30,8 @@ router.use(faqsRouter);
 router.use(messagesRouter);
 router.use(settingsRouter);
 router.use(mockExamsRouter);
+// docs/07_EXECUTION_PLAN.md 9.5/9.6 — bank_transfer + raast manual-payment
+// admin approval queue.
+router.use(bankTransfersRouter);
 
 export default router;

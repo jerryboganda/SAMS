@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { validateBody } from '../utils/validate.js';
 import * as orderService from '../services/orderService.js';
+import * as manualPaymentService from '../services/manualPaymentService.js';
 
 const orderIdParamSchema = z.object({ id: z.coerce.number().int().positive() });
 
@@ -41,4 +42,23 @@ export const downloadInvoice = asyncHandler(async (req, res) => {
   res.sendFile(filePath);
 });
 
-export default { listMyOrders, getOrder, downloadInvoice };
+/**
+ * GET /orders/:id/proof-image (docs/07_EXECUTION_PLAN.md 9.5/9.6) — owner or
+ * admin only (IDOR check lives in orderService.assertViewerCanAccessOrder,
+ * reused by manualPaymentService.getProofImageForViewer). Mirrors
+ * downloadInvoice() above exactly: the real image bytes are only ever
+ * reachable through this authenticated route, never a public static path
+ * (services/manualPaymentService.js's own header has the full design
+ * writeup) — served as a plain `res.send(buffer)` so a browser `<img src>`
+ * request works directly (same-origin httpOnly auth cookies are sent
+ * automatically on an `<img>` request, no Authorization header needed).
+ */
+export const getProofImage = asyncHandler(async (req, res) => {
+  const { id } = validateBody(orderIdParamSchema, req.params);
+  const { buffer, mime } = await manualPaymentService.getProofImageForViewer(id, req.user);
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(buffer);
+});
+
+export default { listMyOrders, getOrder, downloadInvoice, getProofImage };

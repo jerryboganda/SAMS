@@ -40,7 +40,26 @@ const INVOICE_SEQ_KEY = 'invoice_seq';
 // resolved, do not touch again" — this is what makes a replayed callback (or
 // one arriving after e.g. a future admin refund-flag action) a safe no-op
 // instead of double-processing. See completeOrderPayment()'s doc comment.
-const PAYABLE_STATUSES = ['pending', 'awaiting_verification'];
+// Exported (docs/07_EXECUTION_PLAN.md 9.5/9.6) so
+// services/manualPaymentService.js's own pre-checks (proof upload/submit,
+// admin approve/reject) use this SAME list rather than a second, potentially
+// drifting copy of it.
+export const PAYABLE_STATUSES = ['pending', 'awaiting_verification'];
+
+/**
+ * `GET /orders/:id/proof-image`'s URL, keyed purely off `orderId` (never a
+ * generated filename/token) — the client-facing counterpart of
+ * services/manualPaymentService.js's deterministic on-disk
+ * `storage/proofs/order-{orderId}.bin` naming. Exported so
+ * manualPaymentService.js (the upload endpoint's `{url}` response AND the
+ * bank-proof submit endpoint's `fileUrl`-matches-the-real-upload check) and
+ * this file's own `serializeProof()` below compute the IDENTICAL string —
+ * see DECISIONS.md 2026-08-05 for the full proof-image storage/serving
+ * design writeup.
+ */
+export function buildProofImageUrl(orderId) {
+  return `/api/v1/orders/${orderId}/proof-image`;
+}
 
 // ---------------------------------------------------------------------------
 // Serialization — matches client/src/types/index.ts's `Order` interface
@@ -48,12 +67,19 @@ const PAYABLE_STATUSES = ['pending', 'awaiting_verification'];
 // already-built frontend's existing TS types).
 // ---------------------------------------------------------------------------
 
-function serializeProof(proof) {
+export function serializeProof(proof) {
   if (!proof) return undefined;
   return {
     id: proof.id,
     orderId: proof.orderId,
-    filePath: proof.filePath,
+    // The RAW `proof.filePath` DB value (services/manualPaymentService.js's
+    // internal, deterministic on-disk filename — never a browser-reachable
+    // URL, see that file's header) is intentionally NEVER echoed back here.
+    // The client only ever gets the authenticated route's URL, computed
+    // fresh from `orderId` — this is the exact same "raw disk location is
+    // an internal implementation detail, never exposed" discipline
+    // services/invoiceService.js already established for invoice PDFs.
+    filePath: proof.filePath ? buildProofImageUrl(proof.orderId) : undefined,
     referenceNo: proof.referenceNo ?? undefined,
     note: proof.note ?? undefined,
     status: proof.status,
@@ -64,7 +90,7 @@ function serializeProof(proof) {
   };
 }
 
-function serializeOrder(order) {
+export function serializeOrder(order) {
   return {
     id: order.id,
     invoiceNo: order.invoiceNo,
@@ -88,14 +114,19 @@ function serializeOrder(order) {
   };
 }
 
-const ORDER_ASSOCIATIONS = [
+// Exported (docs/07_EXECUTION_PLAN.md 9.5/9.6) so
+// services/manualPaymentService.js's own queries (the admin queue list,
+// reloading an order after approve/reject) include the SAME association set
+// `serializeOrder()` expects — a second, independently-maintained copy of
+// this list would silently drift the moment a new association is added here.
+export const ORDER_ASSOCIATIONS = [
   { model: Course, as: 'course' },
   { model: Coupon, as: 'coupon' },
   { model: User, as: 'user' },
   { model: BankTransferProof, as: 'bankTransferProof' },
 ];
 
-async function loadOrderWithAssociations(orderId) {
+export async function loadOrderWithAssociations(orderId) {
   return Order.findOne({ where: { id: orderId }, include: ORDER_ASSOCIATIONS });
 }
 
@@ -277,8 +308,14 @@ export async function listOrdersForUser(userId) {
   return orders.map(serializeOrder);
 }
 
-/** IDOR check shared by getOrderForViewer/getInvoiceFileForViewer: owner or admin only. */
-function assertViewerCanAccessOrder(order, viewer) {
+/**
+ * IDOR check shared by getOrderForViewer/getInvoiceFileForViewer: owner or
+ * admin only. Exported (docs/07_EXECUTION_PLAN.md 9.5/9.6) so
+ * services/manualPaymentService.js's own `GET /orders/:id/proof-image`
+ * viewer check reuses this SAME rule rather than a second, subtly-different
+ * copy of it.
+ */
+export function assertViewerCanAccessOrder(order, viewer) {
   if (viewer.role === 'admin') return;
   if (order.userId !== viewer.id) {
     throw new ApiError(403, 'FORBIDDEN', 'You do not have permission to view this order.');
@@ -535,4 +572,13 @@ export default {
   processGatewayCallback,
   handleGatewayReturn,
   handleGatewayWebhook,
+  // Reused by services/manualPaymentService.js (docs/07_EXECUTION_PLAN.md 9.5/9.6) —
+  // see each export's own doc comment above.
+  PAYABLE_STATUSES,
+  ORDER_ASSOCIATIONS,
+  serializeOrder,
+  serializeProof,
+  buildProofImageUrl,
+  loadOrderWithAssociations,
+  assertViewerCanAccessOrder,
 };

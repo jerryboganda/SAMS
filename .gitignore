@@ -25,10 +25,16 @@ storage/uploads/*
 storage/invoices/*
 storage/backups/*
 storage/logs/*
+# storage/proofs/ (docs/07_EXECUTION_PLAN.md 9.5/9.6): payment-proof images —
+# NOT statically served (server/src/app.js has no express.static mount for
+# it, unlike storage/uploads/) since a proof image may contain real
+# financial details; see services/manualPaymentService.js's own header.
+storage/proofs/*
 !storage/uploads/.gitkeep
 !storage/invoices/.gitkeep
 !storage/backups/.gitkeep
 !storage/logs/.gitkeep
+!storage/proofs/.gitkeep
 
 # Logs
 *.log

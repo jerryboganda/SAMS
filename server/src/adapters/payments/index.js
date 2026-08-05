@@ -89,19 +89,27 @@ import { ApiError } from '../../utils/apiError.js';
 import mockGateway from './mock.js';
 import jazzcashGateway from './jazzcash.js';
 import easypaisaGateway from './easypaisa.js';
+import raastGateway from './raast.js';
+import bankTransferGateway from './bankTransfer.js';
+import payfastGateway from './payfast.js';
+import safepayGateway from './safepay.js';
 
 const DRIVERS = {
   mock: mockGateway,
   jazzcash: jazzcashGateway, // docs/07_EXECUTION_PLAN.md 9.3
   easypaisa: easypaisaGateway, // docs/07_EXECUTION_PLAN.md 9.4
-  // raast: raastGateway,                // docs/07_EXECUTION_PLAN.md 9.5 —
-  //   manual pseudo-gateway (Settings-sourced manualDetails + proof upload
-  //   reusing the bank_transfer approval pipeline); its own file should
-  //   leave a commented-out slot for a FUTURE direct Raast/bank API driver,
-  //   per docs/02_ARCHITECTURE.md §7.
-  // bank_transfer: bankTransferGateway, // docs/07_EXECUTION_PLAN.md 9.6
-  // payfast: payfastGateway,            // docs/07_EXECUTION_PLAN.md 9.5b — PLACEHOLDER stub
-  // safepay: safepayGateway,            // docs/07_EXECUTION_PLAN.md 9.5b — PLACEHOLDER stub
+  // Manual pseudo-gateways (docs/07_EXECUTION_PLAN.md 9.5/9.6): Settings-
+  // sourced `manualDetails` + proof upload + shared admin approval queue
+  // (server/src/services/manualPaymentService.js). Each driver's own file
+  // leaves a commented-out slot for a FUTURE direct API driver, per
+  // docs/02_ARCHITECTURE.md §7.
+  raast: raastGateway,
+  bank_transfer: bankTransferGateway,
+  // PLACEHOLDER stubs only (docs/07_EXECUTION_PLAN.md 9.5b) — genuinely
+  // non-functional until a real integration replaces them; isConfigured()
+  // returns false until real env keys are set. See each file's own header.
+  payfast: payfastGateway,
+  safepay: safepayGateway,
 };
 
 /** Parses env.PAYMENTS_ENABLED_GATEWAYS (comma list, e.g. "jazzcash,easypaisa,mock") into a trimmed, non-empty array. */
