@@ -28,12 +28,13 @@ import {
   Table,
   Badge,
   Modal,
+  Select,
   ToastSystem,
   ConfirmDialog,
   Tabs,
 } from "../../components/ui";
 import { adminApi } from "../../api/endpoints/admin";
-import { User, UserDevice, LoginEvent, Order, Enrollment } from "../../types";
+import { User, UserDevice, LoginEvent, Order, Enrollment, Course } from "../../types";
 import { formatPKR, formatDate } from "../../utils/formatters";
 import { useAdminSearch } from "../../context/AdminSearchContext";
 
@@ -54,12 +55,24 @@ export const StudentsManagementPage: React.FC = () => {
   const [studentDevices, setStudentDevices] = useState<UserDevice[]>([]);
   const [studentLoginEvents, setStudentLoginEvents] = useState<LoginEvent[]>([]);
   const [studentOrders, setStudentOrders] = useState<Order[]>([]);
+  const [studentEnrollments, setStudentEnrollments] = useState<Enrollment[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
 
   // Confirm Dialogs
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isStatusConfirmOpen, setIsStatusConfirmOpen] = useState(false);
-  const [isExtendConfirmOpen, setIsExtendConfirmOpen] = useState(false);
-  const [extendCourseId, setExtendCourseId] = useState<number>(1);
+
+  // Enrollments Tab: Grant Modal
+  const [isGrantModalOpen, setIsGrantModalOpen] = useState(false);
+  const [grantCourseId, setGrantCourseId] = useState<number>(0);
+  const [grantDays, setGrantDays] = useState<number>(30);
+  const [grantSubmitting, setGrantSubmitting] = useState(false);
+
+  // Enrollments Tab: Per-row Extend / Revoke
+  const [extendingEnrollmentId, setExtendingEnrollmentId] = useState<number | null>(null);
+  const [isRevokeConfirmOpen, setIsRevokeConfirmOpen] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<Enrollment | null>(null);
+  const [revokeSubmitting, setRevokeSubmitting] = useState(false);
 
   const loadStudents = async () => {
     setLoading(true);
@@ -85,14 +98,19 @@ export const StudentsManagementPage: React.FC = () => {
 
   const loadStudentDetailData = async (studentId: number) => {
     try {
-      const [devs, logEvts, ords] = await Promise.all([
+      const [devs, logEvts, ords, enrolls, crs] = await Promise.all([
         adminApi.getStudentDevices(studentId),
         adminApi.getStudentLoginEvents(studentId),
         adminApi.getStudentOrders(studentId),
+        adminApi.getStudentEnrollments(studentId),
+        adminApi.getCourses(),
       ]);
       setStudentDevices(devs);
       setStudentLoginEvents(logEvts);
       setStudentOrders(ords);
+      setStudentEnrollments(enrolls);
+      setCourses(crs);
+      if (crs.length > 0) setGrantCourseId(crs[0].id);
     } catch (err) {
       console.error("Failed to load student sub-data", err);
     }
@@ -130,15 +148,56 @@ export const StudentsManagementPage: React.FC = () => {
     }
   };
 
-  const handleExtendEnrollment = async () => {
-    if (!selectedStudent) return;
+  const handleGrantEnrollment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent || !grantCourseId) return;
+    setGrantSubmitting(true);
     try {
-      await adminApi.extendStudentEnrollment(selectedStudent.id, extendCourseId, 30);
-      setToast(`Enrollment validity extended by +30 Days for ${selectedStudent.name}.`);
-      setIsExtendConfirmOpen(false);
+      const newEnrollment = await adminApi.grantStudentEnrollment(selectedStudent.id, grantCourseId, grantDays);
+      setStudentEnrollments((prev) => [newEnrollment, ...prev]);
+      setToast(`Granted ${grantDays}-day access to "${newEnrollment.courseTitle || "the course"}" for ${selectedStudent.name}.`);
+      setIsGrantModalOpen(false);
+      setGrantDays(30);
     } catch (err: any) {
-      alert(err.message || "Failed to extend validity.");
+      alert(err.message || "Failed to grant course enrollment.");
+    } finally {
+      setGrantSubmitting(false);
     }
+  };
+
+  const handleExtendRowEnrollment = async (enrollment: Enrollment) => {
+    if (!selectedStudent) return;
+    setExtendingEnrollmentId(enrollment.id);
+    try {
+      const updated = await adminApi.extendEnrollment(enrollment.id, 30);
+      setStudentEnrollments((prev) => prev.map((en) => (en.id === updated.id ? updated : en)));
+      setToast(`Extended "${enrollment.courseTitle || "course"}" validity by +30 Days for ${selectedStudent.name}.`);
+    } catch (err: any) {
+      alert(err.message || "Failed to extend enrollment validity.");
+    } finally {
+      setExtendingEnrollmentId(null);
+    }
+  };
+
+  const handleRevokeEnrollment = async () => {
+    if (!selectedStudent || !revokeTarget) return;
+    setRevokeSubmitting(true);
+    try {
+      const updated = await adminApi.revokeEnrollment(revokeTarget.id);
+      setStudentEnrollments((prev) => prev.map((en) => (en.id === updated.id ? updated : en)));
+      setToast(`Revoked access to "${revokeTarget.courseTitle || "the course"}" for ${selectedStudent.name}.`);
+      setIsRevokeConfirmOpen(false);
+      setRevokeTarget(null);
+    } catch (err: any) {
+      alert(err.message || "Failed to revoke enrollment.");
+    } finally {
+      setRevokeSubmitting(false);
+    }
+  };
+
+  const getDaysUntil = (dateStr: string): number => {
+    const diffMs = new Date(dateStr).getTime() - Date.now();
+    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   };
 
   const effectiveSearch = (globalSearch || search).trim().toLowerCase();
@@ -324,16 +383,16 @@ export const StudentsManagementPage: React.FC = () => {
           <Card className="p-6 border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div>
-                <h3 className="text-base font-bold text-[#0E2A47]">Active Course Access</h3>
-                <p className="text-xs text-slate-500">View validity windows or extend access for candidate.</p>
+                <h3 className="text-base font-bold text-[#0E2A47]">Course Enrollments</h3>
+                <p className="text-xs text-slate-500">View validity windows, grant new access, extend, or revoke enrollments for this candidate.</p>
               </div>
               <Button
                 size="sm"
                 variant="teal"
                 icon={<Plus className="w-4 h-4" />}
-                onClick={() => setIsExtendConfirmOpen(true)}
+                onClick={() => setIsGrantModalOpen(true)}
               >
-                Extend / Grant Access
+                Grant New Enrollment
               </Button>
             </div>
 
@@ -341,36 +400,80 @@ export const StudentsManagementPage: React.FC = () => {
               columns={[
                 {
                   header: "Course Package",
-                  accessor: (row) => (
+                  accessor: (row: Enrollment) => (
                     <div>
-                      <p className="font-bold text-[#0E2A47]">NRE Step 1 Complete Preparation Masterclass</p>
-                      <span className="text-xs text-slate-500">PMDC Exam Category • NRE1</span>
+                      <p className="font-bold text-[#0E2A47]">{row.courseTitle || `Course #${row.courseId}`}</p>
+                      <span className="text-xs text-slate-500">Course ID #{row.courseId}</span>
                     </div>
                   ),
                 },
                 {
                   header: "Source",
-                  accessor: () => <Badge variant="teal">Order Purchase</Badge>,
-                },
-                {
-                  header: "Validity Period",
-                  accessor: () => <span className="text-xs font-semibold text-slate-700">180 Days (Expires in 142 days)</span>,
+                  accessor: (row: Enrollment) => (
+                    <Badge variant={row.source === "purchase" ? "teal" : "blue"}>
+                      {row.source === "purchase" ? "Order Purchase" : "Manual Grant"}
+                    </Badge>
+                  ),
                 },
                 {
                   header: "Status",
-                  accessor: () => <Badge variant="teal">ACTIVE</Badge>,
+                  accessor: (row: Enrollment) => (
+                    <Badge
+                      variant={row.status === "active" ? "teal" : row.status === "expired" ? "warning" : "danger"}
+                    >
+                      {row.status.toUpperCase()}
+                    </Badge>
+                  ),
+                },
+                {
+                  header: "Expires",
+                  accessor: (row: Enrollment) => {
+                    const daysLeft = getDaysUntil(row.expiresAt);
+                    return (
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700">{formatDate(row.expiresAt)}</p>
+                        {row.status === "active" && (
+                          <span
+                            className={`text-[11px] ${daysLeft <= 14 ? "font-bold text-amber-600" : "text-slate-500"}`}
+                          >
+                            {daysLeft >= 0 ? `Expires in ${daysLeft} days` : `Expired ${Math.abs(daysLeft)} days ago`}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  },
                 },
                 {
                   header: "Action",
-                  accessor: () => (
-                    <Button size="xs" variant="outline" onClick={() => setIsExtendConfirmOpen(true)}>
-                      Extend +30 Days
-                    </Button>
+                  accessor: (row: Enrollment) => (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        isLoading={extendingEnrollmentId === row.id}
+                        onClick={() => handleExtendRowEnrollment(row)}
+                      >
+                        Extend +30 Days
+                      </Button>
+                      {row.status === "active" && (
+                        <Button
+                          size="xs"
+                          variant="danger"
+                          onClick={() => {
+                            setRevokeTarget(row);
+                            setIsRevokeConfirmOpen(true);
+                          }}
+                        >
+                          Revoke
+                        </Button>
+                      )}
+                    </div>
                   ),
                 },
               ]}
-              data={[{ id: 1 }]}
+              data={studentEnrollments}
               keyExtractor={(r) => r.id}
+              emptyText="This candidate has no course enrollments yet. Use “Grant New Enrollment” to give access."
             />
           </Card>
         )}
@@ -532,16 +635,56 @@ export const StudentsManagementPage: React.FC = () => {
           onCancel={() => setIsStatusConfirmOpen(false)}
         />
 
-        {/* Extend Validity Modal */}
+        {/* Grant New Enrollment Modal */}
+        <Modal
+          isOpen={isGrantModalOpen}
+          onClose={() => setIsGrantModalOpen(false)}
+          title="Grant New Course Enrollment"
+          description={`Manually enroll ${selectedStudent.name} into a course for a fixed validity period.`}
+        >
+          <form onSubmit={handleGrantEnrollment} className="space-y-4">
+            <Select
+              label="Course"
+              value={grantCourseId.toString()}
+              onChange={(e) => setGrantCourseId(Number(e.target.value))}
+              options={courses.map((c) => ({ value: c.id.toString(), label: c.title }))}
+            />
+
+            <Input
+              label="Validity (Days)"
+              type="number"
+              min={1}
+              required
+              value={grantDays}
+              onChange={(e) => setGrantDays(Number(e.target.value))}
+              helperText="Number of days the candidate will have access starting today."
+            />
+
+            <div className="pt-2 flex justify-end gap-2">
+              <Button variant="outline" type="button" onClick={() => setIsGrantModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="teal" isLoading={grantSubmitting} disabled={!grantCourseId}>
+                Grant Access
+              </Button>
+            </div>
+          </form>
+        </Modal>
+
+        {/* Revoke Enrollment Confirm Dialog */}
         <ConfirmDialog
-          isOpen={isExtendConfirmOpen}
-          title="Extend Course Validity (+30 Days)"
-          message={`Grant a 30-day extension to ${selectedStudent.name} for their NRE Step 1 Course enrollment?`}
-          confirmLabel="Grant +30 Days"
+          isOpen={isRevokeConfirmOpen}
+          title="Revoke Course Enrollment"
+          message={`Are you sure you want to revoke ${selectedStudent.name}'s access to "${revokeTarget?.courseTitle || "this course"}"? This immediately removes their course and QBank access.`}
+          confirmLabel="Revoke Access"
           cancelLabel="Cancel"
-          variant="info"
-          onConfirm={handleExtendEnrollment}
-          onCancel={() => setIsExtendConfirmOpen(false)}
+          variant="danger"
+          isLoading={revokeSubmitting}
+          onConfirm={handleRevokeEnrollment}
+          onCancel={() => {
+            setIsRevokeConfirmOpen(false);
+            setRevokeTarget(null);
+          }}
         />
       </div>
     );

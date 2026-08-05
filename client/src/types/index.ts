@@ -379,6 +379,12 @@ export interface AdminDashboardKPIs {
   activeEnrollmentsCount: number;
   topCourses: { courseId: number; title: string; enrollmentsCount: number; revenue: number }[];
   recentOrders: Order[];
+  // Phase 11.1 — a deliberate, documented extension beyond the original
+  // shape (see server/src/services/adminDashboardService.js's own header):
+  // 30-day, zero-filled, chronological daily revenue series backing
+  // AdminDashboardPage.tsx's revenue trend chart, replacing what used to be
+  // a fully-hardcoded local mock array.
+  revenueTrend: { day: string; amount: number }[];
 }
 
 export interface ApiResponseEnvelope<T> {

@@ -21,6 +21,14 @@ import bankTransfersRouter from './bankTransfers.js';
 import ordersRouter from './orders.js';
 import couponsRouter from './coupons.js';
 import announcementsRouter from './announcements.js';
+import dashboardRouter from './dashboard.js';
+import reportsRouter from './reports.js';
+import auditLogsRouter from './auditLogs.js';
+import studentsRouter from './students.js';
+import enrollmentsRouter from './enrollments.js';
+import questionsRouter from './questions.js';
+import questionImportRouter from './questionImport.js';
+import taxonomyRouter from './taxonomy.js';
 
 const router = Router();
 
@@ -41,5 +49,19 @@ router.use(ordersRouter);
 router.use(couponsRouter);
 // docs/07_EXECUTION_PLAN.md 10.2 — admin announcement composer/broadcast.
 router.use(announcementsRouter);
+// docs/07_EXECUTION_PLAN.md 11.2 — admin students management (search/detail,
+// devices reset, login history, manual enrollment grant/extend/revoke).
+router.use(studentsRouter);
+router.use(enrollmentsRouter);
+// docs/07_EXECUTION_PLAN.md 11.1 — admin KPI dashboard.
+router.use(dashboardRouter);
+// docs/07_EXECUTION_PLAN.md 11.5 — combined reports endpoint + audit-log viewer.
+router.use(reportsRouter);
+router.use(auditLogsRouter);
+// docs/07_EXECUTION_PLAN.md 11.3/11.4 — QBank admin (question CRUD +
+// taxonomy CRUD + CSV batch import).
+router.use(questionsRouter);
+router.use(questionImportRouter);
+router.use(taxonomyRouter);
 
 export default router;

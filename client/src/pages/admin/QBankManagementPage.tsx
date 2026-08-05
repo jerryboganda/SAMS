@@ -20,6 +20,13 @@ import { adminApi } from "../../api/endpoints/admin";
 import { Question, QuestionOption, Subject, BodySystem } from "../../types";
 import { useAdminSearch } from "../../context/AdminSearchContext";
 
+// Monotonic counter for generating stable, purely-local React keys for
+// question options that don't (yet) have a real server-assigned id — see
+// the `options` state comment below for why this must be kept separate
+// from `id`.
+let localOptionKeySeq = 0;
+const nextLocalOptionKey = (): string => `opt-local-${++localOptionKeySeq}`;
+
 export const QBankManagementPage: React.FC = () => {
   const { globalSearch } = useAdminSearch();
   const navigate = useNavigate();
@@ -43,11 +50,20 @@ export const QBankManagementPage: React.FC = () => {
   const [subjectName, setSubjectName] = useState("Anatomy");
   const [systemName, setSystemName] = useState("Cardiovascular System");
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium");
-  const [options, setOptions] = useState<{ id: number; text: string; isCorrect: boolean }[]>([
-    { id: 1, text: "", isCorrect: true },
-    { id: 2, text: "", isCorrect: false },
-    { id: 3, text: "", isCorrect: false },
-    { id: 4, text: "", isCorrect: false },
+  // Local editor-only option shape. `id` mirrors the REAL server-assigned
+  // `question_options.id` when this option already exists on the server,
+  // and is intentionally left unset (undefined) for options that don't —
+  // a brand-new question, or a row added via "+ Add Option" — so the save
+  // payload never fabricates one (see handleSaveQuestion). `uiKey` is a
+  // separate, purely-local identifier used only for React list keys and
+  // for targeting the right row in the handlers below; it must NOT be
+  // derived from `id`, because several id-less new options can coexist in
+  // the editor at once and still need distinct identities.
+  const [options, setOptions] = useState<{ uiKey: string; id?: number; text: string; isCorrect: boolean }[]>([
+    { uiKey: nextLocalOptionKey(), text: "", isCorrect: true },
+    { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
+    { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
+    { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
   ]);
   const [tags, setTags] = useState("nre1, high-yield");
   const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit");
@@ -83,18 +99,22 @@ export const QBankManagementPage: React.FC = () => {
       setDifficulty(q.difficulty);
       if (q.options && q.options.length > 0) {
         setOptions(
-          q.options.map((opt, idx) => ({
-            id: idx + 1,
+          q.options.map((opt) => ({
+            // Preserve the REAL server-assigned option id — overwriting it
+            // with a fabricated sequential id here is exactly the bug this
+            // fix addresses (see handleSaveQuestion).
+            uiKey: `opt-server-${opt.id}`,
+            id: opt.id,
             text: opt.optionText,
             isCorrect: !!opt.isCorrect,
           }))
         );
       } else {
         setOptions([
-          { id: 1, text: "Option A", isCorrect: true },
-          { id: 2, text: "Option B", isCorrect: false },
-          { id: 3, text: "Option C", isCorrect: false },
-          { id: 4, text: "Option D", isCorrect: false },
+          { uiKey: nextLocalOptionKey(), text: "Option A", isCorrect: true },
+          { uiKey: nextLocalOptionKey(), text: "Option B", isCorrect: false },
+          { uiKey: nextLocalOptionKey(), text: "Option C", isCorrect: false },
+          { uiKey: nextLocalOptionKey(), text: "Option D", isCorrect: false },
         ]);
       }
     } else {
@@ -104,33 +124,38 @@ export const QBankManagementPage: React.FC = () => {
       setSubjectName(subjects[0]?.name || "Anatomy");
       setSystemName(systems[0]?.name || "Cardiovascular System");
       setDifficulty("medium");
+      // Brand-new question: none of these options exist on the server yet,
+      // so none get an `id`.
       setOptions([
-        { id: 1, text: "", isCorrect: true },
-        { id: 2, text: "", isCorrect: false },
-        { id: 3, text: "", isCorrect: false },
-        { id: 4, text: "", isCorrect: false },
+        { uiKey: nextLocalOptionKey(), text: "", isCorrect: true },
+        { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
+        { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
+        { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
       ]);
     }
     setActiveTab("edit");
     setIsEditorOpen(true);
   };
 
-  const handleOptionTextChange = (id: number, text: string) => {
-    setOptions(options.map((o) => (o.id === id ? { ...o, text } : o)));
+  const handleOptionTextChange = (uiKey: string, text: string) => {
+    setOptions(options.map((o) => (o.uiKey === uiKey ? { ...o, text } : o)));
   };
 
-  const handleSetCorrectOption = (id: number) => {
-    setOptions(options.map((o) => ({ ...o, isCorrect: o.id === id })));
+  const handleSetCorrectOption = (uiKey: string) => {
+    setOptions(options.map((o) => ({ ...o, isCorrect: o.uiKey === uiKey })));
   };
 
   const handleAddOptionRow = () => {
     if (options.length >= 6) return;
-    setOptions([...options, { id: Date.now(), text: "", isCorrect: false }]);
+    // New row has no real server id yet — leave `id` unset (not a
+    // fabricated one) so the save payload tells the backend "insert a new
+    // question_options row" instead of "update row #<fake id>".
+    setOptions([...options, { uiKey: nextLocalOptionKey(), text: "", isCorrect: false }]);
   };
 
-  const handleRemoveOptionRow = (id: number) => {
+  const handleRemoveOptionRow = (uiKey: string) => {
     if (options.length <= 2) return;
-    const filtered = options.filter((o) => o.id !== id);
+    const filtered = options.filter((o) => o.uiKey !== uiKey);
     if (!filtered.some((o) => o.isCorrect)) {
       filtered[0].isCorrect = true;
     }
@@ -147,13 +172,28 @@ export const QBankManagementPage: React.FC = () => {
       return;
     }
 
-    const payloadOptions: QuestionOption[] = options.map((o, idx) => ({
-      id: idx + 1,
-      questionId: editingQuestion?.id || 0,
-      optionText: o.text,
-      isCorrect: o.isCorrect,
-      sortOrder: idx + 1,
-    }));
+    // Preserve each option's REAL server id where it has one (an edit to an
+    // existing option) and omit `id` entirely where it doesn't (a brand-new
+    // option) — never fabricate one. This lets the backend tell "update in
+    // place" apart from "insert a new row", which matters because a past
+    // exam attempt's `selected_option_id` may still point at an existing
+    // row (docs/04_API_SPEC.md §7: "edit creates new option rows safely").
+    // Note: `QuestionOption` (client/src/types/index.ts) intentionally
+    // still requires `id`/`questionId`/`sortOrder` for the server-response
+    // shape used elsewhere (student exam/review screens always get
+    // fully-populated options back from the server) — the save-payload
+    // shape below legitimately differs (optional `id`, no `questionId`,
+    // since the backend derives that from the parent question), so it's
+    // cast at the two call sites below rather than widening that shared
+    // read-path type.
+    const payloadOptions: { id?: number; optionText: string; isCorrect: boolean; sortOrder: number }[] = options.map(
+      (o, idx) => ({
+        ...(o.id != null ? { id: o.id } : {}),
+        optionText: o.text,
+        isCorrect: o.isCorrect,
+        sortOrder: idx + 1,
+      })
+    );
 
     try {
       if (editingQuestion) {
@@ -163,7 +203,7 @@ export const QBankManagementPage: React.FC = () => {
           subjectName,
           systemName,
           difficulty,
-          options: payloadOptions,
+          options: payloadOptions as unknown as QuestionOption[],
         });
         setQuestions(questions.map((q) => (q.id === updated.id ? updated : q)));
         setToastMessage(`Question #${updated.id} updated successfully.`);
@@ -175,7 +215,7 @@ export const QBankManagementPage: React.FC = () => {
           systemId: systems.find((sys) => sys.name === systemName)?.id || 1,
           systemName,
           stem,
-          options: payloadOptions,
+          options: payloadOptions as unknown as QuestionOption[],
           explanation,
           difficulty,
           isActive: true,
@@ -189,10 +229,10 @@ export const QBankManagementPage: React.FC = () => {
         setStem("");
         setExplanation("");
         setOptions([
-          { id: 1, text: "", isCorrect: true },
-          { id: 2, text: "", isCorrect: false },
-          { id: 3, text: "", isCorrect: false },
-          { id: 4, text: "", isCorrect: false },
+          { uiKey: nextLocalOptionKey(), text: "", isCorrect: true },
+          { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
+          { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
+          { uiKey: nextLocalOptionKey(), text: "", isCorrect: false },
         ]);
         setActiveTab("edit");
       } else {
@@ -200,6 +240,15 @@ export const QBankManagementPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
+      // Surface the backend's message verbatim — this is the only place
+      // that reports a failed save, including the 409 the backend raises
+      // when a removed option was actually selected in a past exam attempt
+      // (e.g. `Cannot remove option "..." — it has been selected in N past
+      // attempt(s)`). Uses alert() rather than the page-level Toast banner:
+      // the Editor Modal (`fixed inset-0 z-50`) renders on top of that
+      // Toast and would hide it, and the modal deliberately stays open on
+      // failure so the admin can read the reason and fix the form.
+      alert(err instanceof Error ? err.message : "Failed to save question. Please try again.");
     }
   };
 
@@ -491,12 +540,12 @@ export const QBankManagementPage: React.FC = () => {
 
                 <div className="space-y-2">
                   {options.map((opt, idx) => (
-                    <div key={opt.id} className="flex items-center gap-2">
+                    <div key={opt.uiKey} className="flex items-center gap-2">
                       <input
                         type="radio"
                         name="correctRadioGroup"
                         checked={opt.isCorrect}
-                        onChange={() => handleSetCorrectOption(opt.id)}
+                        onChange={() => handleSetCorrectOption(opt.uiKey)}
                         className="w-4 h-4 text-[#0FA3A3] focus:ring-[#0FA3A3]"
                         title="Mark as Correct Answer"
                       />
@@ -506,14 +555,14 @@ export const QBankManagementPage: React.FC = () => {
                       <input
                         type="text"
                         value={opt.text}
-                        onChange={(e) => handleOptionTextChange(opt.id, e.target.value)}
+                        onChange={(e) => handleOptionTextChange(opt.uiKey, e.target.value)}
                         placeholder={`Choice ${String.fromCharCode(65 + idx)} option text...`}
                         className="flex-1 h-9 px-3 text-xs border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0FA3A3]"
                       />
                       {options.length > 2 && (
                         <button
                           type="button"
-                          onClick={() => handleRemoveOptionRow(opt.id)}
+                          onClick={() => handleRemoveOptionRow(opt.uiKey)}
                           className="p-1 text-slate-400 hover:text-rose-600"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -567,7 +616,7 @@ export const QBankManagementPage: React.FC = () => {
               <div className="space-y-2 pt-2">
                 {options.map((opt, idx) => (
                   <div
-                    key={opt.id}
+                    key={opt.uiKey}
                     className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
                       opt.isCorrect
                         ? "bg-emerald-50 border-emerald-300 text-emerald-900 font-bold"

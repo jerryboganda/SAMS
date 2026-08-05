@@ -9,6 +9,7 @@ import {
   Coupon,
   Course,
   CourseSection,
+  Enrollment,
   FacultyMember,
   FAQ,
   Lecture,
@@ -27,6 +28,7 @@ import {
   MOCK_CONTACT_MESSAGES,
   MOCK_COUPONS,
   MOCK_COURSES,
+  MOCK_ENROLLMENTS,
   MOCK_EXAM_PAPER,
   MOCK_FACULTY,
   MOCK_FAQS,
@@ -61,6 +63,15 @@ export const adminApi = {
           { courseId: 3, title: "MBBS Clinical Foundations", enrollmentsCount: 57, revenue: 684000 },
         ],
         recentOrders: MOCK_ORDERS,
+        // Phase 11.1 — matches the real API's 30-day zero-filled series shape.
+        revenueTrend: Array.from({ length: 30 }, (_, i) => {
+          const d = new Date();
+          d.setDate(d.getDate() - (29 - i));
+          return {
+            day: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            amount: Math.round(10000 + Math.random() * 25000),
+          };
+        }),
       };
     }
     return apiFetch<AdminDashboardKPIs>("/admin/dashboard");
@@ -190,25 +201,110 @@ export const adminApi = {
     return apiFetch<Order[]>(`/admin/students/${studentId}/orders`);
   },
 
-  async extendStudentEnrollment(studentId: number | string, courseId: number, days: number = 30): Promise<{ success: boolean }> {
+  // --- Course enrollments (Students > Course Enrollments tab) --------------
+  // Contract (docs/07_EXECUTION_PLAN.md Phase 11.2 / server/src/routes/v1/admin/enrollments.js):
+  //   GET   /admin/students/:id/enrollments            -> Enrollment[]
+  //   POST  /admin/students/:id/enrollments             { courseId, days }  -> Enrollment (grant)
+  //   PATCH /admin/enrollments/:id  { action:"extend", days } | { action:"revoke" } -> Enrollment
+  async getStudentEnrollments(studentId: number | string): Promise<Enrollment[]> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 200);
+      return MOCK_ENROLLMENTS.filter((e) => e.userId === Number(studentId));
+    }
+    return apiFetch<Enrollment[]>(`/admin/students/${studentId}/enrollments`);
+  },
+
+  async grantStudentEnrollment(studentId: number | string, courseId: number, days: number = 30): Promise<Enrollment> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 350);
+      const course = MOCK_COURSES.find((c) => c.id === Number(courseId));
+      const now = new Date();
+      const expires = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+      const newEnrollment: Enrollment = {
+        id: Date.now(),
+        userId: Number(studentId),
+        courseId: Number(courseId),
+        courseTitle: course?.title || `Course #${courseId}`,
+        source: "manual",
+        startsAt: now.toISOString(),
+        expiresAt: expires.toISOString(),
+        status: "active",
+      };
+      MOCK_ENROLLMENTS.unshift(newEnrollment);
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "enrollment.grant",
+        entityType: "Enrollment",
+        entityId: newEnrollment.id,
+        summary: `Granted manual enrollment (+${days} days) for student #${studentId} in course "${newEnrollment.courseTitle}"`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+      return newEnrollment;
+    }
+    return apiFetch<Enrollment>(`/admin/students/${studentId}/enrollments`, {
+      method: "POST",
+      body: JSON.stringify({ courseId, days }),
+    });
+  },
+
+  async extendEnrollment(enrollmentId: number, days: number = 30): Promise<Enrollment> {
     if (CONFIG.USE_MOCK) {
       await mockLatency(null, 300);
+      const enrollment = MOCK_ENROLLMENTS.find((e) => e.id === Number(enrollmentId));
+      if (enrollment) {
+        // Extend from whichever is later: the current expiry or right now —
+        // so extending an already-expired enrollment doesn't leave it with a
+        // still-past expiresAt (which would contradict the "active" status
+        // this action also restores it to).
+        const currentExpiry = enrollment.expiresAt ? new Date(enrollment.expiresAt).getTime() : Date.now();
+        const base = new Date(Math.max(currentExpiry, Date.now()));
+        base.setDate(base.getDate() + days);
+        enrollment.expiresAt = base.toISOString();
+        enrollment.status = "active";
+      }
       MOCK_AUDIT_LOGS.unshift({
         id: Date.now(),
         actorUserId: 2,
         actorName: "Dr. Zabih Ullah (Admin)",
         action: "enrollment.extend",
         entityType: "Enrollment",
-        entityId: courseId,
-        summary: `Extended validity by +${days} days for student #${studentId} in course #${courseId}`,
+        entityId: Number(enrollmentId),
+        summary: `Extended enrollment #${enrollmentId} validity by +${days} days`,
         ip: "182.180.122.45",
         createdAt: new Date().toISOString(),
       });
-      return { success: true };
+      return enrollment || MOCK_ENROLLMENTS[0];
     }
-    return apiFetch<{ success: boolean }>(`/admin/students/${studentId}/enrollments/extend`, {
-      method: "POST",
-      body: JSON.stringify({ courseId, days }),
+    return apiFetch<Enrollment>(`/admin/enrollments/${enrollmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action: "extend", days }),
+    });
+  },
+
+  async revokeEnrollment(enrollmentId: number): Promise<Enrollment> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 300);
+      const enrollment = MOCK_ENROLLMENTS.find((e) => e.id === Number(enrollmentId));
+      if (enrollment) enrollment.status = "revoked";
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "enrollment.revoke",
+        entityType: "Enrollment",
+        entityId: Number(enrollmentId),
+        summary: `Revoked enrollment #${enrollmentId}`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+      return enrollment || MOCK_ENROLLMENTS[0];
+    }
+    return apiFetch<Enrollment>(`/admin/enrollments/${enrollmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action: "revoke" }),
     });
   },
 

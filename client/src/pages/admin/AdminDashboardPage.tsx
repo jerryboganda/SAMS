@@ -69,16 +69,13 @@ export const AdminDashboardPage: React.FC = () => {
     );
   }
 
-  // Generate 30-day revenue mock points for the area chart
-  const revenueTrendData = [
-    { day: "Day 1", amount: 12000 },
-    { day: "Day 5", amount: 15000 },
-    { day: "Day 10", amount: 18000 },
-    { day: "Day 15", amount: 14000 },
-    { day: "Day 20", amount: 22000 },
-    { day: "Day 25", amount: 28000 },
-    { day: "Day 30", amount: 35000 },
-  ];
+  // Phase 11.1 — real 30-day daily revenue series from GET /admin/dashboard's
+  // `revenueTrend` field (was previously a fully-hardcoded 7-point mock
+  // array; see DECISIONS.md). Chart bar heights are scaled against this
+  // series' own max, not a hardcoded 35000 ceiling, so it still renders
+  // sensibly regardless of actual revenue scale.
+  const revenueTrendData = kpis.revenueTrend ?? [];
+  const revenueTrendMax = Math.max(1, ...revenueTrendData.map((pt) => pt.amount));
 
   return (
     <div className="space-y-8 pb-12">
@@ -229,23 +226,32 @@ export const AdminDashboardPage: React.FC = () => {
 
           {/* Visual Revenue Spark Area Chart */}
           <div className="h-44 w-full bg-gradient-to-b from-teal-50/50 to-white rounded-xl p-4 border border-slate-200 flex flex-col justify-end">
-            <div className="flex items-end justify-between h-32 gap-2 pt-4">
-              {revenueTrendData.map((pt, i) => {
-                const heightPct = Math.round((pt.amount / 35000) * 100);
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
-                    <span className="text-[10px] font-bold text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {formatPKR(pt.amount)}
-                    </span>
-                    <div
-                      style={{ height: `${heightPct}%` }}
-                      className="w-full max-w-12 bg-gradient-to-t from-[#0E2A47] to-[#0FA3A3] rounded-t-md transition-all group-hover:brightness-125"
-                    />
-                    <span className="text-[10px] text-slate-500 font-semibold">{pt.day}</span>
-                  </div>
-                );
-              })}
-            </div>
+            {revenueTrendData.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center pb-6">No revenue data yet for this window.</p>
+            ) : (
+              <div className="flex items-end justify-between h-32 gap-0.5 pt-4">
+                {revenueTrendData.map((pt, i) => {
+                  const heightPct = Math.round((pt.amount / revenueTrendMax) * 100);
+                  // 30 daily bars is too dense for every label to stay
+                  // legible — show every 5th day plus the last (most
+                  // recent) one; the hover tooltip always shows the exact
+                  // amount+day regardless.
+                  const showLabel = i % 5 === 0 || i === revenueTrendData.length - 1;
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+                      <span className="text-[10px] font-bold text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity absolute -top-4 whitespace-nowrap bg-white px-1 rounded shadow-sm border border-slate-100 z-10">
+                        {pt.day}: {formatPKR(pt.amount)}
+                      </span>
+                      <div
+                        style={{ height: `${Math.max(heightPct, 2)}%` }}
+                        className="w-full bg-gradient-to-t from-[#0E2A47] to-[#0FA3A3] rounded-t-sm transition-all group-hover:brightness-125"
+                      />
+                      <span className="text-[9px] text-slate-500 font-semibold h-3">{showLabel ? pt.day : ""}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </Card>
       )}

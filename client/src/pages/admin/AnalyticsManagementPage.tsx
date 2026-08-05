@@ -99,30 +99,42 @@ export const AnalyticsManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI Stat Summary Cards */}
+      {/* KPI Stat Summary Cards.
+          Phase 11.5 fix (found live, not just unwired — a real bug): these
+          four cards previously used `||` for their real-vs-placeholder
+          fallback (e.g. `realValue || 2850000`), which in JavaScript treats
+          a genuine `0` the SAME as "no real data yet" and silently falls
+          back to the hardcoded mock number — so a genuinely zero-revenue
+          period rendered a fake "Rs 2,850,000" instead of "Rs 0", and
+          "Active Course Subscriptions" was never wired to `data` at all
+          (a bare "382 Candidates" string). Fixed to compute real totals
+          unconditionally once `data` has loaded (the `loading` gate above
+          already guarantees a fetch attempt completed by this point) and to
+          only show a placeholder while `data` itself is still null/undefined
+          (`??`, not `||`, which correctly preserves a real 0). */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
         <StatCard
           title="Gross Sales (YTD)"
-          value={formatPKR(data?.revenueByMonth?.reduce((acc: number, curr: any) => acc + curr.revenue, 0) || 2850000)}
+          value={formatPKR(data?.revenueByMonth?.reduce((acc: number, curr: any) => acc + curr.revenue, 0) ?? 0)}
           change="+18.4% vs prev period"
           changeType="positive"
           icon={<TrendingUp className="w-6 h-6 text-emerald-600" />}
         />
         <StatCard
           title="Active Course Subscriptions"
-          value="382 Candidates"
+          value={`${data?.enrollmentsByCourse?.reduce((acc: number, curr: any) => acc + curr.activeCount, 0) ?? 0} Candidates`}
           change="Across NRE, SMLE & MBBS"
           icon={<BookOpen className="w-6 h-6 text-[#0FA3A3]" />}
         />
         <StatCard
           title="QBank Vignettes Attempted"
-          value={data?.qbankUsage?.totalQuestionsAttempted?.toLocaleString() || "14,250"}
+          value={(data?.qbankUsage?.totalQuestionsAttempted ?? 0).toLocaleString()}
           change="3,000+ active item pool"
           icon={<BarChart3 className="w-6 h-6 text-indigo-600" />}
         />
         <StatCard
           title="QBank Average Accuracy"
-          value={`${data?.qbankUsage?.averagePassRate || 74.2}%`}
+          value={`${data?.qbankUsage?.averagePassRate ?? 0}%`}
           change="National NRE benchmark"
           changeType="positive"
           icon={<Award className="w-6 h-6 text-amber-500" />}
