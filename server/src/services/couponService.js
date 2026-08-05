@@ -129,4 +129,175 @@ export async function getQuote({ courseId, couponCode }) {
   return { course, coupon, ...amounts };
 }
 
-export default { resolveCoupon, computeQuoteAmounts, getQuote };
+// ---------------------------------------------------------------------------
+// Admin coupon CRUD — docs/07_EXECUTION_PLAN.md 9.8, docs/04_API_SPEC.md §7.
+// Added ALONGSIDE (not replacing) the student-facing quote logic above, per
+// the task brief — this file already owns "everything coupon-shaped", so
+// admin management lives here too rather than a third file. Serialization
+// matches client/src/types/index.ts's `Coupon` interface exactly (CLAUDE.md
+// §1a: prefer changing the backend to match the already-built frontend's
+// existing TS types).
+// ---------------------------------------------------------------------------
+
+const COUPON_ADMIN_INCLUDE = [{ model: Course, as: 'course' }];
+
+function serializeCouponAdmin(coupon) {
+  return {
+    id: coupon.id,
+    code: coupon.code,
+    type: coupon.type,
+    value: Number(coupon.value),
+    courseId: coupon.courseId ?? undefined,
+    courseTitle: coupon.course?.title ?? undefined,
+    maxUses: coupon.maxUses ?? undefined,
+    usedCount: coupon.usedCount,
+    validFrom: coupon.validFrom ?? undefined,
+    validUntil: coupon.validUntil ?? undefined,
+    isActive: coupon.isActive,
+  };
+}
+
+async function findCouponOrThrow(id) {
+  const coupon = await Coupon.findByPk(id, { include: COUPON_ADMIN_INCLUDE });
+  if (!coupon) {
+    throw new ApiError(404, 'NOT_FOUND', 'Coupon not found.');
+  }
+  return coupon;
+}
+
+/** `courseId===null/undefined` is always valid ("all courses", docs/03_DATABASE_SCHEMA.md) — only a NON-null value must resolve to a real course row. */
+async function assertCourseExistsIfProvided(courseId) {
+  if (courseId === null || courseId === undefined) return;
+  const course = await Course.findByPk(courseId);
+  if (!course) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'courseId does not reference an existing course.');
+  }
+}
+
+/**
+ * Cross-field checks that need the CURRENT row state to evaluate correctly
+ * for a partial PATCH (a lone `{value: 150}` on an already-`type:'percent'`
+ * coupon must still be rejected, even though `type` itself isn't in this
+ * request) — done here in the service rather than in the controller's zod
+ * schema, which only ever sees the request body in isolation. `effective*`
+ * = the patch's value if present, else the existing row's own value.
+ *
+ * The percent-over-100 cap is a UX sanity check, not a security boundary —
+ * couponService.js#computeQuoteAmounts already clamps any discount into
+ * `[0, price]` defensively regardless of what's stored (see that function's
+ * own doc comment) — but it's still worth rejecting at write time so an
+ * admin doesn't accidentally create a nonsensical "150% off" coupon.
+ */
+function assertCouponBusinessRules({ effectiveType, effectiveValue, effectiveValidFrom, effectiveValidUntil }) {
+  if (effectiveType === 'percent' && effectiveValue !== undefined && Number(effectiveValue) > 100) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'A percent coupon value cannot exceed 100.');
+  }
+  if (effectiveValidFrom && effectiveValidUntil && new Date(effectiveValidFrom) >= new Date(effectiveValidUntil)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'validFrom must be before validUntil.');
+  }
+}
+
+function translateUniqueConstraintError(err) {
+  if (err?.name === 'SequelizeUniqueConstraintError') {
+    throw new ApiError(409, 'CONFLICT', 'A coupon with this code already exists.');
+  }
+  throw err;
+}
+
+export async function listCouponsAdmin() {
+  const coupons = await Coupon.findAll({ order: [['id', 'DESC']], include: COUPON_ADMIN_INCLUDE });
+  return coupons.map(serializeCouponAdmin);
+}
+
+export async function createCouponAdmin(data) {
+  await assertCourseExistsIfProvided(data.courseId ?? null);
+  assertCouponBusinessRules({
+    effectiveType: data.type,
+    effectiveValue: data.value,
+    effectiveValidFrom: data.validFrom ?? null,
+    effectiveValidUntil: data.validUntil ?? null,
+  });
+
+  let created;
+  try {
+    created = await Coupon.create({
+      code: data.code,
+      type: data.type,
+      value: data.value,
+      courseId: data.courseId ?? null,
+      maxUses: data.maxUses ?? null,
+      validFrom: data.validFrom ?? null,
+      validUntil: data.validUntil ?? null,
+      isActive: data.isActive ?? true,
+    });
+  } catch (err) {
+    translateUniqueConstraintError(err);
+  }
+  return serializeCouponAdmin(await findCouponOrThrow(created.id));
+}
+
+export async function updateCouponAdmin(id, data) {
+  const coupon = await findCouponOrThrow(id);
+  if (data.courseId !== undefined) await assertCourseExistsIfProvided(data.courseId);
+
+  assertCouponBusinessRules({
+    effectiveType: data.type !== undefined ? data.type : coupon.type,
+    effectiveValue: data.value !== undefined ? data.value : Number(coupon.value),
+    effectiveValidFrom: data.validFrom !== undefined ? data.validFrom : coupon.validFrom,
+    effectiveValidUntil: data.validUntil !== undefined ? data.validUntil : coupon.validUntil,
+  });
+
+  const patch = {};
+  if (data.code !== undefined) patch.code = data.code;
+  if (data.type !== undefined) patch.type = data.type;
+  if (data.value !== undefined) patch.value = data.value;
+  if (data.courseId !== undefined) patch.courseId = data.courseId;
+  if (data.maxUses !== undefined) patch.maxUses = data.maxUses;
+  if (data.validFrom !== undefined) patch.validFrom = data.validFrom;
+  if (data.validUntil !== undefined) patch.validUntil = data.validUntil;
+  if (data.isActive !== undefined) patch.isActive = data.isActive;
+  // `usedCount` is server-controlled only, via the redemption path in
+  // orderService.js#completeOrderPayment — deliberately never read from
+  // `data` here even if a caller's body somehow included it (the
+  // controller's zod schema already omits it from the accepted shape; this
+  // is defense in depth, per the task brief).
+
+  try {
+    await coupon.update(patch);
+  } catch (err) {
+    translateUniqueConstraintError(err);
+  }
+  return serializeCouponAdmin(await findCouponOrThrow(id));
+}
+
+/**
+ * `orders.coupon_id` is `ON DELETE SET NULL` (docs/03_DATABASE_SCHEMA.md) —
+ * that FK behavior was clearly designed to make a hard coupon delete DB-safe
+ * even when orders already reference it (those orders keep their own
+ * already-computed `discount_amount`/`final_amount`; only the FK pointer is
+ * cleared). Per the task brief's own steer, this deliberately does NOT add
+ * an extra "already used" guard (unlike adminCourseService.js's
+ * course-delete guard, which exists because `courses` has no such
+ * SET-NULL safety net) — see DECISIONS.md 2026-08-05.
+ */
+export async function deleteCouponAdmin(id) {
+  await findCouponOrThrow(id);
+  await Coupon.destroy({ where: { id } });
+}
+
+export async function toggleCouponAdmin(id) {
+  const coupon = await findCouponOrThrow(id);
+  await coupon.update({ isActive: !coupon.isActive });
+  return serializeCouponAdmin(await findCouponOrThrow(id));
+}
+
+export default {
+  resolveCoupon,
+  computeQuoteAmounts,
+  getQuote,
+  listCouponsAdmin,
+  createCouponAdmin,
+  updateCouponAdmin,
+  deleteCouponAdmin,
+  toggleCouponAdmin,
+};

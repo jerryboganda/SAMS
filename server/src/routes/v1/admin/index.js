@@ -18,6 +18,8 @@ import messagesRouter from './messages.js';
 import settingsRouter from './settings.js';
 import mockExamsRouter from './mockExams.js';
 import bankTransfersRouter from './bankTransfers.js';
+import ordersRouter from './orders.js';
+import couponsRouter from './coupons.js';
 
 const router = Router();
 
@@ -33,5 +35,8 @@ router.use(mockExamsRouter);
 // docs/07_EXECUTION_PLAN.md 9.5/9.6 — bank_transfer + raast manual-payment
 // admin approval queue.
 router.use(bankTransfersRouter);
+// docs/07_EXECUTION_PLAN.md 9.8 — admin orders management + coupons CRUD.
+router.use(ordersRouter);
+router.use(couponsRouter);
 
 export default router;
