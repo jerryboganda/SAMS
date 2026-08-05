@@ -34,6 +34,7 @@
 //     deleteQuestionAdmin() below.
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
+import { sanitizePlainText, sanitizeRichText } from '../utils/sanitize.js';
 
 const { Question, QuestionOption, Subject, BodySystem, TestAttemptQuestion, sequelize } = db;
 
@@ -211,11 +212,12 @@ async function reconcileOptions(questionId, incomingOptions, transaction) {
     }
   }
 
-  // 3. Apply.
+  // 3. Apply. `optionText` is sanitized plain-text-only (docs/10_SECURITY_CHECKLIST.md
+  // §G) — an option is a short answer choice, never formatted rich text.
   for (const { existing, incoming } of matched) {
     await existing.update(
       {
-        optionText: incoming.optionText,
+        optionText: sanitizePlainText(incoming.optionText),
         isCorrect: !!incoming.isCorrect,
         sortOrder: incoming.sortOrder ?? existing.sortOrder,
       },
@@ -227,7 +229,7 @@ async function reconcileOptions(questionId, incomingOptions, transaction) {
     await QuestionOption.bulkCreate(
       toInsert.map((o, idx) => ({
         questionId,
-        optionText: o.optionText,
+        optionText: sanitizePlainText(o.optionText),
         isCorrect: !!o.isCorrect,
         sortOrder: o.sortOrder ?? existingOptions.length + idx,
       })),
@@ -278,10 +280,15 @@ export async function createQuestionAdmin(data) {
         examCategory: data.examCategory,
         subjectId: data.subjectId,
         systemId: data.systemId,
-        stem: data.stem,
+        // `stem` and `referenceText` are plain-text-only (a question stem is
+        // never formatted rich text — see docs/10_SECURITY_CHECKLIST.md §G);
+        // `explanation` is longer-form admin-authored prose that may
+        // reasonably want basic formatting (bold/lists), so it gets the
+        // rich-text whitelist instead.
+        stem: sanitizePlainText(data.stem),
         imageUrl: data.imageUrl ?? null,
-        explanation: data.explanation,
-        referenceText: data.referenceText ?? null,
+        explanation: sanitizeRichText(data.explanation),
+        referenceText: sanitizePlainText(data.referenceText) ?? null,
         difficulty: data.difficulty ?? 'medium',
         isActive: data.isActive ?? true,
       },
@@ -291,7 +298,8 @@ export async function createQuestionAdmin(data) {
     await QuestionOption.bulkCreate(
       data.options.map((o, idx) => ({
         questionId: question.id,
-        optionText: o.optionText,
+        // Plain-text-only — an answer option is never formatted rich text.
+        optionText: sanitizePlainText(o.optionText),
         isCorrect: !!o.isCorrect,
         sortOrder: o.sortOrder ?? idx,
       })),
@@ -329,10 +337,10 @@ export async function updateQuestionAdmin(id, data) {
     if (data.examCategory !== undefined) patch.examCategory = data.examCategory;
     if (data.subjectId !== undefined) patch.subjectId = data.subjectId;
     if (data.systemId !== undefined) patch.systemId = data.systemId;
-    if (data.stem !== undefined) patch.stem = data.stem;
+    if (data.stem !== undefined) patch.stem = sanitizePlainText(data.stem);
     if (data.imageUrl !== undefined) patch.imageUrl = data.imageUrl;
-    if (data.explanation !== undefined) patch.explanation = data.explanation;
-    if (data.referenceText !== undefined) patch.referenceText = data.referenceText;
+    if (data.explanation !== undefined) patch.explanation = sanitizeRichText(data.explanation);
+    if (data.referenceText !== undefined) patch.referenceText = sanitizePlainText(data.referenceText);
     if (data.difficulty !== undefined) patch.difficulty = data.difficulty;
     if (data.isActive !== undefined) patch.isActive = data.isActive;
 

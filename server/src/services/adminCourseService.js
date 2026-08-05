@@ -7,6 +7,7 @@ import { Op } from 'sequelize';
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
 import { assertExactIdSet } from '../utils/reorder.js';
+import { sanitizePlainText, sanitizeRichText } from '../utils/sanitize.js';
 
 const { Course, CourseSection, Lecture, Order, Enrollment, LectureProgress, LectureBookmark, sequelize } = db;
 
@@ -202,11 +203,15 @@ export async function getCourseById(id) {
 export async function createCourse(data) {
   try {
     const course = await Course.create({
-      title: data.title,
+      // `title`/`shortDescription` are plain-text-only; `description` is
+      // longer-form admin-authored prose that may reasonably want basic
+      // formatting (bold/lists), so it gets the rich-text whitelist
+      // (docs/10_SECURITY_CHECKLIST.md §G).
+      title: sanitizePlainText(data.title),
       slug: data.slug,
       examCategory: data.examCategory,
-      shortDescription: data.shortDescription ?? null,
-      description: data.description ?? null,
+      shortDescription: sanitizePlainText(data.shortDescription) ?? null,
+      description: sanitizeRichText(data.description) ?? null,
       thumbnailUrl: data.thumbnailUrl ?? null,
       price: data.price ?? 0,
       currency: data.currency ?? 'PKR',
@@ -227,11 +232,11 @@ export async function createCourse(data) {
 export async function updateCourse(id, data) {
   const course = await findCourseOrThrow(id);
   const patch = {};
-  if (data.title !== undefined) patch.title = data.title;
+  if (data.title !== undefined) patch.title = sanitizePlainText(data.title);
   if (data.slug !== undefined) patch.slug = data.slug;
   if (data.examCategory !== undefined) patch.examCategory = data.examCategory;
-  if (data.shortDescription !== undefined) patch.shortDescription = data.shortDescription;
-  if (data.description !== undefined) patch.description = data.description;
+  if (data.shortDescription !== undefined) patch.shortDescription = sanitizePlainText(data.shortDescription);
+  if (data.description !== undefined) patch.description = sanitizeRichText(data.description);
   if (data.thumbnailUrl !== undefined) patch.thumbnailUrl = data.thumbnailUrl;
   if (data.price !== undefined) patch.price = data.price;
   if (data.currency !== undefined) patch.currency = data.currency;
@@ -283,14 +288,14 @@ export async function listSections(courseId) {
 export async function createSection(courseId, data) {
   await findCourseOrThrow(courseId);
   const sortOrder = data.sortOrder ?? (await nextSortOrder(CourseSection, { courseId }));
-  const section = await CourseSection.create({ courseId, title: data.title, sortOrder });
+  const section = await CourseSection.create({ courseId, title: sanitizePlainText(data.title), sortOrder });
   return serializeSectionAdmin({ ...section.get({ plain: true }), lectures: [] });
 }
 
 export async function updateSection(id, data) {
   const section = await findSectionOrThrow(id);
   const patch = {};
-  if (data.title !== undefined) patch.title = data.title;
+  if (data.title !== undefined) patch.title = sanitizePlainText(data.title);
   if (data.sortOrder !== undefined) patch.sortOrder = data.sortOrder;
   await section.update(patch);
   const withLectures = await CourseSection.findByPk(id, { include: [{ model: Lecture, as: 'lectures' }] });
@@ -344,8 +349,11 @@ export async function createLecture(sectionId, data) {
   const lecture = await Lecture.create({
     courseId: section.courseId,
     sectionId,
-    title: data.title,
-    description: data.description ?? null,
+    // `title` is plain-text-only; `description` is longer-form prose that
+    // may reasonably want basic formatting (docs/10_SECURITY_CHECKLIST.md
+    // §G).
+    title: sanitizePlainText(data.title),
+    description: sanitizeRichText(data.description) ?? null,
     videoProvider: data.videoProvider ?? 'bunny',
     videoRef: data.videoRef ?? null,
     durationSeconds: data.durationSeconds ?? 0,
@@ -359,8 +367,8 @@ export async function createLecture(sectionId, data) {
 export async function updateLecture(id, data) {
   const lecture = await findLectureOrThrow(id);
   const patch = {};
-  if (data.title !== undefined) patch.title = data.title;
-  if (data.description !== undefined) patch.description = data.description;
+  if (data.title !== undefined) patch.title = sanitizePlainText(data.title);
+  if (data.description !== undefined) patch.description = sanitizeRichText(data.description);
   if (data.videoProvider !== undefined) patch.videoProvider = data.videoProvider;
   if (data.videoRef !== undefined) patch.videoRef = data.videoRef;
   if (data.durationSeconds !== undefined) patch.durationSeconds = data.durationSeconds;

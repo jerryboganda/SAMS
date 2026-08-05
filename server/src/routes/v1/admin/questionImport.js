@@ -13,13 +13,17 @@
 import { Router } from 'express';
 import * as adminQuestionImportController from '../../../controllers/adminQuestionImportController.js';
 import { audit } from '../../../middleware/audit.js';
+import { importLimiter } from '../../../middleware/rateLimits.js';
 
 const router = Router();
 
-router.post('/questions/import/dry-run', adminQuestionImportController.dryRunImport);
+// docs/10_SECURITY_CHECKLIST.md §H "import 10/h" — server/src/middleware/
+// rateLimits.js's importLimiter, keyed by the authenticated admin's user id.
+router.post('/questions/import/dry-run', importLimiter, adminQuestionImportController.dryRunImport);
 
 router.post(
   '/questions/import/commit',
+  importLimiter,
   audit('question_import.commit', 'question', {
     entityId: () => null,
     summary: (req, body) => `Imported ${body?.data?.importedCount ?? 0} question(s) via CSV batch import`,

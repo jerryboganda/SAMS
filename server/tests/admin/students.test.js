@@ -345,6 +345,96 @@ describe('POST /api/v1/admin/students/:id/reset-devices', () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /admin/students/:id/anonymize — Phase 12.5 security-audit finding M-3
+// (docs/10_SECURITY_CHECKLIST.md §I)
+// ---------------------------------------------------------------------------
+
+describe('POST /api/v1/admin/students/:id/anonymize', () => {
+  test('AC: scrubs PII, permanently disables login, kills devices/sessions, preserves financial/audit records, audit-logs the action', async () => {
+    const { agent, user: admin } = await createAdminSession(app);
+    const { user: student, password } = await createVerifiedUser({ email: uniqueEmail('anon'), role: 'student' });
+    const originalName = student.name;
+    const originalEmail = student.email;
+
+    const course = await createCourse();
+    const order = await createTestOrder(student, course);
+    const enrollment = await createTestEnrollment(student, course, { orderId: order.id });
+    const device = await createTestDevice(student.id);
+    const token = await createTestRefreshToken(student.id, { deviceId: device.id });
+
+    const res = await agent.post(`/api/v1/admin/students/${student.id}/anonymize`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Deleted user');
+    expect(res.body.data.email).toBe(`deleted-user-${student.id}@anonymized.invalid`);
+    expect(res.body.data.email).not.toBe(originalEmail);
+
+    const fresh = await User.findByPk(student.id);
+    expect(fresh.name).toBe('Deleted user');
+    expect(fresh.name).not.toBe(originalName);
+    expect(fresh.email).toBe(`deleted-user-${student.id}@anonymized.invalid`);
+    expect(fresh.phone).toBeNull();
+    expect(fresh.status).toBe('suspended');
+    expect(fresh.twofaEnabled).toBe(false);
+
+    // The old password must no longer work — passwordHash was replaced with
+    // an unusable random hash, on top of status:'suspended' also blocking login.
+    const loginRes = await request(app).post('/api/v1/auth/login').send({ email: originalEmail, password });
+    expect(loginRes.status).not.toBe(200);
+
+    // Devices/sessions killed, same as reset-devices.
+    const freshDevice = await UserDevice.findByPk(device.id);
+    expect(freshDevice.isActive).toBe(false);
+    const freshToken = await RefreshToken.findByPk(token.id);
+    expect(freshToken.revokedAt).not.toBeNull();
+
+    // Financial/audit records untouched — same order/enrollment rows, still
+    // pointing at the same (now-anonymized) user id.
+    const freshOrder = await Order.findByPk(order.id);
+    expect(freshOrder.userId).toBe(student.id);
+    expect(Number(freshOrder.finalAmount)).toBe(Number(order.finalAmount));
+    const freshEnrollment = await Enrollment.findByPk(enrollment.id);
+    expect(freshEnrollment.userId).toBe(student.id);
+    expect(freshEnrollment.status).toBe('active');
+
+    const auditRow = await AuditLog.findOne({ where: { action: 'student.anonymize', entityId: student.id } });
+    expect(auditRow).not.toBeNull();
+    expect(auditRow.actorUserId).toBe(admin.id);
+    expect(auditRow.entityType).toBe('User');
+  });
+
+  test('idempotent: anonymizing an already-anonymized account is a no-op success, not an error', async () => {
+    const { agent } = await createAdminSession(app);
+    const { user: student } = await createVerifiedUser({ email: uniqueEmail('anon-twice'), role: 'student' });
+
+    const first = await agent.post(`/api/v1/admin/students/${student.id}/anonymize`);
+    expect(first.status).toBe(200);
+
+    const second = await agent.post(`/api/v1/admin/students/${student.id}/anonymize`);
+    expect(second.status).toBe(200);
+    expect(second.body.data.email).toBe(first.body.data.email);
+  });
+
+  test('not found: unknown student id -> 404', async () => {
+    const { agent } = await createAdminSession(app);
+    const res = await agent.post('/api/v1/admin/students/9999999/anonymize');
+    expect(res.status).toBe(404);
+  });
+
+  test('auth failure: no session -> 401', async () => {
+    const { user: student } = await createVerifiedUser({ email: uniqueEmail('anon-401'), role: 'student' });
+    const res = await request(app).post(`/api/v1/admin/students/${student.id}/anonymize`);
+    expect(res.status).toBe(401);
+  });
+
+  test('role failure: student session -> 403', async () => {
+    const { agent } = await createStudentSession(app);
+    const { user: student } = await createVerifiedUser({ email: uniqueEmail('anon-403'), role: 'student' });
+    const res = await agent.post(`/api/v1/admin/students/${student.id}/anonymize`);
+    expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /admin/students/:id/login-events
 // ---------------------------------------------------------------------------
 

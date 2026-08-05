@@ -12,6 +12,7 @@ import auth from '../../middleware/auth.js';
 import deviceCheck from '../../middleware/deviceCheck.js';
 import requireRole from '../../middleware/requireRole.js';
 import handleImageUpload from '../../middleware/upload.js';
+import { checkoutLimiter } from '../../middleware/rateLimits.js';
 import * as checkoutController from '../../controllers/checkoutController.js';
 import * as manualPaymentController from '../../controllers/manualPaymentController.js';
 
@@ -21,8 +22,10 @@ const requireStudent = [auth, deviceCheck, requireRole('student')];
 // docs/07_EXECUTION_PLAN.md 9.7 — real gateway-availability listing, replacing
 // the checkout page's previously-hardcoded gateway config array.
 router.get('/gateways', ...requireStudent, checkoutController.listGateways);
-router.post('/quote', ...requireStudent, checkoutController.quote);
-router.post('/orders', ...requireStudent, checkoutController.createOrder);
+// checkoutLimiter (Phase 12.1, DECISIONS.md 2026-08-05 Finding L-2) — keyed
+// by authenticated user id, on top of app.js's blanket global limiter.
+router.post('/quote', ...requireStudent, checkoutLimiter, checkoutController.quote);
+router.post('/orders', ...requireStudent, checkoutLimiter, checkoutController.createOrder);
 router.get('/return/:gateway', checkoutController.handleReturn);
 
 // Manual pseudo-gateway (raast/bank_transfer) proof-upload flow —

@@ -133,6 +133,43 @@ export const heartbeatLimiter = rateLimit({
   handler: envelopeHandler('RATE_LIMITED', 'Too many heartbeat requests. Please slow down.'),
 });
 
+/**
+ * POST /admin/questions/import/dry-run + POST /admin/questions/import/commit:
+ * 10 requests / hour (docs/10_SECURITY_CHECKLIST.md §H's named rate-limit map
+ * — "import 10/h"), keyed by the authenticated admin's user id (these routes
+ * are always behind auth/requireRole('admin') at routes/v1/admin/index.js,
+ * so req.user is always present in practice; req.ip is only a defensive
+ * fallback). `max` raised under NODE_ENV=test for the same reason as the
+ * other limiters in this file.
+ */
+export const importLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: IS_TEST ? 100000 : 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user?.id ? `user:${req.user.id}` : req.ip),
+  handler: envelopeHandler('RATE_LIMITED', 'Too many import requests. Please try again later.'),
+});
+
+/**
+ * POST /checkout/quote + POST /checkout/orders: 20 requests / 15 min (Phase 9.10
+ * security audit, Finding L-2 — see DECISIONS.md 2026-08-05 — logged as a
+ * genuine Phase 12 hardening candidate: previously only the blanket
+ * 300/15min/IP global limiter in app.js protected these routes). Keyed by the
+ * authenticated student's user id — both routes require auth
+ * (requireStudent in routes/v1/checkout.js), so req.user is always present
+ * in practice; req.ip is only a defensive fallback. `max` raised under
+ * NODE_ENV=test for the same reason as the other limiters in this file.
+ */
+export const checkoutLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: IS_TEST ? 100000 : 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user?.id ? `user:${req.user.id}` : req.ip),
+  handler: envelopeHandler('RATE_LIMITED', 'Too many checkout requests. Please try again later.'),
+});
+
 export default {
   authLimiter,
   resendVerificationLimiter,
@@ -140,4 +177,6 @@ export default {
   contactLimiter,
   playLimiter,
   heartbeatLimiter,
+  importLimiter,
+  checkoutLimiter,
 };

@@ -56,6 +56,7 @@ ADMIN_ALERT_EMAIL=admin@samsacademy.com
 5. Payments: keep `sandbox` env values → run a 10 PKR sandbox purchase end-to-end (JazzCash + EasyPaisa) → verify auto-activation + invoice email → switch to production creds. Fill Raast ID / IBAN / QR in Admin → Settings and do one real small Raast payment → approve in the queue. PayFast/Safepay stay disabled until you sign up with them (then: fill env keys, add to `PAYMENTS_ENABLED_GATEWAYS`, complete the stub per their docs). Set gateway return/IPN URLs to `https://<domain>/api/v1/checkout/return/<gw>` and `/api/v1/webhooks/payments/<gw>` in each merchant portal.
 6. Cron safety net (hPanel → Advanced → Cron Jobs): although the app runs node-cron internally, add a daily `curl -s https://<domain>/api/v1/health` (keep-alive/monitor) and weekly hit to the backup-trigger route if configured.
 7. Point DNS, force HTTPS, submit sitemap to Search Console.
+8. Enable Hostinger's WAF/CDN (hPanel → Website → your domain → Security/Performance, exact menu name varies by plan) — `docs/10_SECURITY_CHECKLIST.md §H` requires this be noted here as a panel-level step; it's not application code, just a checkbox in hPanel, but easy to forget it's a required delivery step.
 
 ## 4. Updating the app
 GitHub method: merge to `main` → auto build+deploy (zero-touch). ZIP method: `npm run package` → upload. Migrations: run `npm run migrate` via SSH after deploys that include new migrations (README lists which releases do).

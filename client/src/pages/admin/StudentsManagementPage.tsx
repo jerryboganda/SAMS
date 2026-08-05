@@ -61,6 +61,8 @@ export const StudentsManagementPage: React.FC = () => {
   // Confirm Dialogs
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isStatusConfirmOpen, setIsStatusConfirmOpen] = useState(false);
+  const [isAnonymizeConfirmOpen, setIsAnonymizeConfirmOpen] = useState(false);
+  const [anonymizeSubmitting, setAnonymizeSubmitting] = useState(false);
 
   // Enrollments Tab: Grant Modal
   const [isGrantModalOpen, setIsGrantModalOpen] = useState(false);
@@ -145,6 +147,27 @@ export const StudentsManagementPage: React.FC = () => {
       setIsStatusConfirmOpen(false);
     } catch (err: any) {
       alert(err.message || "Failed to update status.");
+    }
+  };
+
+  // Phase 12.5 security-audit finding M-3 (docs/10_SECURITY_CHECKLIST.md §I)
+  // — scrubs PII (email->hash, name->"Deleted user") and permanently
+  // disables the account; every order/enrollment/audit-log/test-history row
+  // is preserved untouched. Irreversible, so gated behind its own confirm
+  // dialog (same pattern as handleResetDevice/handleToggleStatus above).
+  const handleAnonymize = async () => {
+    if (!selectedStudent) return;
+    setAnonymizeSubmitting(true);
+    try {
+      const updated = await adminApi.anonymizeStudent(selectedStudent.id);
+      setSelectedStudent(updated);
+      setStudents(students.map((s) => (s.id === updated.id ? updated : s)));
+      setToast(`Account anonymized — all personal data for #${updated.id} has been permanently scrubbed.`);
+      setIsAnonymizeConfirmOpen(false);
+    } catch (err: any) {
+      alert(err.message || "Failed to anonymize this account.");
+    } finally {
+      setAnonymizeSubmitting(false);
     }
   };
 
@@ -344,6 +367,19 @@ export const StudentsManagementPage: React.FC = () => {
                   onClick={() => setIsStatusConfirmOpen(true)}
                 >
                   {selectedStudent.status === "active" ? "Suspend Account" : "Activate Account"}
+                </Button>
+              </div>
+
+              <div className="border-t border-red-100 bg-red-50/60 -mx-6 -mb-6 px-6 py-4 rounded-b-2xl flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-red-700">Danger Zone — Anonymize Account</h4>
+                  <p className="text-xs text-slate-500">
+                    Permanently scrubs this candidate's name/email/phone and disables login. Orders, enrollments, and
+                    exam history are preserved. This cannot be undone.
+                  </p>
+                </div>
+                <Button variant="danger" size="sm" onClick={() => setIsAnonymizeConfirmOpen(true)}>
+                  Anonymize Account
                 </Button>
               </div>
             </Card>
@@ -633,6 +669,19 @@ export const StudentsManagementPage: React.FC = () => {
           variant={selectedStudent.status === "active" ? "danger" : "info"}
           onConfirm={handleToggleStatus}
           onCancel={() => setIsStatusConfirmOpen(false)}
+        />
+
+        {/* Confirm Anonymize (irreversible) */}
+        <ConfirmDialog
+          isOpen={isAnonymizeConfirmOpen}
+          title="Anonymize Candidate Account"
+          message={`This will permanently scrub ${selectedStudent.name}'s name, email, and phone number, and disable their login. Their orders, enrollments, and exam history are kept intact for financial/audit records. This action CANNOT be undone. Continue?`}
+          confirmLabel="Anonymize Permanently"
+          cancelLabel="Cancel"
+          variant="danger"
+          isLoading={anonymizeSubmitting}
+          onConfirm={handleAnonymize}
+          onCancel={() => setIsAnonymizeConfirmOpen(false)}
         />
 
         {/* Grant New Enrollment Modal */}

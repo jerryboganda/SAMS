@@ -5,7 +5,7 @@
 // docs/04_API_SPEC.md §1, docs/02_ARCHITECTURE.md §4.
 import bcrypt from 'bcrypt';
 import geoip from 'geoip-lite';
-import { Op } from 'sequelize';
+import { Op, UniqueConstraintError } from 'sequelize';
 import { ApiError } from '../utils/apiError.js';
 import { sha256Hex, randomTokenHex, randomNumericCode } from '../utils/crypto.js';
 import { signAccessToken } from '../utils/jwt.js';
@@ -183,6 +183,44 @@ async function maybeSendNewDeviceAlert(user, req, matchResult, device) {
   await notificationService.notifyNewDeviceLogin({ user, ip: normalizeIp(req.ip), deviceName: device?.deviceName });
 }
 
+/**
+ * Creates the reverify_login OneTimeToken row for a fresh 6-digit code,
+ * retrying with a NEW random code on a token_hash collision instead of
+ * letting it surface as a raw 500 to a legitimate user's login attempt.
+ *
+ * Security-audit finding (Phase 12.5, re-confirming a gap tracked since the
+ * Phase 5 security-fix pass, HANDOFF.md): one_time_tokens.token_hash is a
+ * single GLOBAL unique column shared by verify_email/reset_password (32-byte
+ * randomTokenHex -> ~2^256 space, collision risk negligible) AND
+ * reverify_login (only randomNumericCode(6) -> 1,000,000 possible values).
+ * A birthday-paradox collision against some OTHER currently-active
+ * reverify_login code is a real, previously-observed failure mode (see
+ * DECISIONS.md's Phase 9.9 entry: an actual SequelizeUniqueConstraintError
+ * on this exact column, caused by concurrent suspicious-login test traffic,
+ * not a hypothetical). This bounded retry (default 5 attempts — the odds of
+ * even a SECOND consecutive collision are astronomically small; a real,
+ * unrelated DB error still propagates rather than looping forever) removes
+ * the user-facing failure mode without touching the shared token_hash
+ * column's uniqueness guarantee for the other two purposes.
+ */
+async function createReverifyLoginToken(userId, attemptsLeft = 5) {
+  const rawCode = randomNumericCode(6);
+  try {
+    await OneTimeToken.create({
+      userId,
+      purpose: 'reverify_login',
+      tokenHash: sha256Hex(rawCode),
+      expiresAt: new Date(Date.now() + REVERIFY_LOGIN_TOKEN_TTL_MINUTES * 60 * 1000),
+    });
+    return rawCode;
+  } catch (err) {
+    if (err instanceof UniqueConstraintError && attemptsLeft > 1) {
+      return createReverifyLoginToken(userId, attemptsLeft - 1);
+    }
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 2.1 Register + email verification
 // ---------------------------------------------------------------------------
@@ -331,13 +369,7 @@ export async function login({ email, password, twofaCode }, req, res) {
 
   const suspiciousResult = await detectSuspicious({ user, req, matchResult });
   if (suspiciousResult.suspicious) {
-    const rawCode = randomNumericCode(6);
-    await OneTimeToken.create({
-      userId: user.id,
-      purpose: 'reverify_login',
-      tokenHash: sha256Hex(rawCode),
-      expiresAt: new Date(Date.now() + REVERIFY_LOGIN_TOKEN_TTL_MINUTES * 60 * 1000),
-    });
+    const rawCode = await createReverifyLoginToken(user.id);
     await sendMail(reverifyCodeTemplate({ user, code: rawCode }));
     await logEvent({
       userId: user.id,

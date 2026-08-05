@@ -59,6 +59,19 @@ const envSchema = z.object({
   // dedicated test MySQL DB, migrated fresh per run. Name kept exactly as
   // specified (DB_NAME_test) — do not rename.
   DB_NAME_test: z.string().default('sams_academy_test'),
+  // Perf-only DB name (docs/07_EXECUTION_PLAN.md 12.4): the synthetic-load
+  // scripts under server/scripts/perf/ connect to this THIRD, dedicated
+  // database — never DB_NAME (dev) or DB_NAME_test (jest, reset by
+  // server/tests/globalSetup.cjs on every `npm test` run) — same isolation
+  // pattern as DB_NAME_test, one env var lower.
+  DB_NAME_PERF: z.string().default('sams_academy_perf'),
+  // Executable used by services/backupService.js (Phase 12.3) to run
+  // mysqldump. Defaults to the bare command name, which resolves via PATH on
+  // Hostinger's Linux shared hosting (and most CI/dev boxes) with zero
+  // config. Only needed as an absolute path override on a machine where
+  // mysqldump isn't on PATH (e.g. a Windows dev box with a MySQL install
+  // that didn't add its `bin/` to PATH) — set it in `server/.env`.
+  MYSQLDUMP_PATH: z.string().default('mysqldump'),
 
   SMTP_HOST: z.string().default(''),
   SMTP_PORT: z.coerce.number().int().default(587),

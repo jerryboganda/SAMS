@@ -3,6 +3,7 @@
 // routes + client/dist static serving w/ SPA fallback + 404 + errorHandler.
 import fs from 'node:fs';
 import path from 'node:path';
+import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
@@ -19,8 +20,74 @@ import logger from './utils/logger.js';
 
 const app = express();
 
-// --- Middleware chain: helmet -> cors -> json -> urlencoded -> cookies -> hpp -> rateLimit ---
-app.use(helmet());
+// --- Middleware chain: helmet -> compression -> cors -> json -> urlencoded -> cookies -> hpp -> rateLimit ---
+//
+// CSP (docs/10_SECURITY_CHECKLIST.md §A "helmet defaults + CSP on app/player
+// pages (self + video CDN + inline-hash only)"). This is a single monolith
+// SPA (Express serves client/dist with SPA fallback below) — there is no
+// separate "player route" to scope a narrower policy to, so one global CSP
+// covers both the app shell and the player page it renders client-side.
+// Directive-by-directive reasoning (Phase 12.1):
+//   - scriptSrc: 'self' only — client/index.html has a single
+//     type="module" src="/src/main.tsx" (built to a hashed /assets/*.js file
+//     by Vite) and no inline <script> tags, so no 'unsafe-inline'/nonce is
+//     needed here.
+//   - styleSrc: 'self' + 'unsafe-inline' — Tailwind's build emits a single
+//     external stylesheet (also 'self'), but React sets a handful of inline
+//     `style="..."` attributes at runtime (e.g. progress-bar widths, chart
+//     colors) with no nonce/hash system in this codebase, so 'unsafe-inline'
+//     is required for those to render. Also covers the Google Fonts
+//     stylesheet's own internal @font-face rules once fetched.
+//   - fontSrc / the Google Fonts links in client/index.html: 'self' +
+//     fonts.googleapis.com (stylesheet) + fonts.gstatic.com (the actual font
+//     files) — index.html <link>s these directly, unrelated to Bunny.
+//   - imgSrc: 'self' + data: (the inline SVG favicon in index.html is a
+//     data: URI) + https: (course thumbnails/question images are served
+//     from our own /uploads under 'self', but admin-entered content — course
+//     descriptions, faculty bios — may reference arbitrary external image
+//     URLs; kept permissive here rather than breaking legitimate admin
+//     content, since img-src alone can't execute script).
+//   - mediaSrc: 'self' + https://*.b-cdn.net — Bunny's CDN pull-zone
+//     hostname (BUNNY_CDN_HOSTNAME) serving direct HLS/MP4 URLs
+//     (server/src/adapters/video/bunny.js buildHlsUrl).
+//   - frameSrc: 'self' + https://iframe.mediadelivery.net — Bunny's iframe
+//     embed URL (bunny.js buildIframeUrl / BUNNY_IFRAME_BASE), used when
+//     BUNNY_CDN_HOSTNAME isn't configured.
+//   - connectSrc: 'self' + https://*.b-cdn.net — the HLS player (hls.js)
+//     fetches .m3u8/.ts segments directly via XHR/fetch from the CDN
+//     pull-zone, which CSP treats as a "connect", not a "media" load.
+//   - objectSrc: 'none' — no <object>/<embed> anywhere in the app.
+//   - baseUri: 'self' — blocks a <base> tag hijack of relative URLs.
+//   - frameAncestors: 'self' — this app is never meant to be framed by
+//     another origin (equivalent to X-Frame-Options: SAMEORIGIN, which
+//     helmet also sets by default).
+// Verified against a real `npm run build --prefix client` output served
+// through this exact app (NODE_ENV=production) — no CSP-violation console
+// errors on the built homepage/course pages. See DECISIONS.md for the full
+// verification note.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        mediaSrc: ["'self'", 'https://*.b-cdn.net'],
+        frameSrc: ["'self'", 'https://iframe.mediadelivery.net'],
+        connectSrc: ["'self'", 'https://*.b-cdn.net'],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'self'"],
+      },
+    },
+  })
+);
+// Placed early (right after helmet, before body parsers) so every response —
+// API JSON payloads and the static client/dist assets served further below —
+// gets compressed, not just a subset of routes.
+app.use(compression());
 app.use(cors({ origin: env.APP_URL, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 // A real hosted-checkout gateway (JazzCash/EasyPaisa/PayFast/Safepay, Phase

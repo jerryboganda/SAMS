@@ -17,6 +17,7 @@ import db from '../models/index.js';
 import logger from '../utils/logger.js';
 import { sendMail } from '../utils/mailer.js';
 import { ApiError } from '../utils/apiError.js';
+import { sanitizePlainText, sanitizeRichText } from '../utils/sanitize.js';
 
 const { Announcement, Course, User, Enrollment, Notification } = db;
 
@@ -114,9 +115,13 @@ export async function createAnnouncementAdmin({ title, body, audience, courseId,
   // `createdBy` MUST be the authenticated admin's own user id, passed in by
   // the controller from req.user.id — never a client-supplied display-name
   // string. See the controller's own doc comment for why.
+  //
+  // `title` is plain-text-only; `body` is longer-form admin-authored prose
+  // that may reasonably want basic formatting (bold/lists), so it gets the
+  // rich-text whitelist (docs/10_SECURITY_CHECKLIST.md §G).
   const announcement = await Announcement.create({
-    title,
-    body,
+    title: sanitizePlainText(title),
+    body: sanitizeRichText(body),
     audience,
     courseId: audience === 'course' ? courseId : null,
     sendEmail: !!sendEmail,
@@ -207,7 +212,21 @@ export async function sendAnnouncementEmailBlast(userIds, announcement, { batchS
           sendMail({
             to: u.email,
             subject: `[SAMS Academy] ${announcement.title}`,
-            text: `Hi ${u.name},\n\n${announcement.body}\n\n— SAMS Academy`,
+            // docs/10_SECURITY_CHECKLIST.md §I: "Emails include unsubscribe
+            // note for announcement blasts (transactional exempt)" — this is
+            // the one non-transactional bulk email in the codebase (every
+            // other sendMail() call — verify/reset/2FA/reverify/receipts/
+            // reminders — is a direct response to the recipient's own
+            // action, exempt per the checklist's own wording). A plain
+            // sender-identification note only, NOT a false claim of a
+            // working unsubscribe link/preference toggle — no such mechanism
+            // exists anywhere in this codebase (confirmed by a full grep of
+            // client/src before writing this; Phase 12.5 security-audit
+            // finding L-1). Claiming a nonexistent opt-out would be worse
+            // than no note at all; a real one-click unsubscribe needs a new
+            // token+route+preference column, deferred as a genuine follow-up
+            // (see DECISIONS.md).
+            text: `Hi ${u.name},\n\n${announcement.body}\n\n— SAMS Academy\n\nYou're receiving this announcement because you're a registered SAMS Academy candidate. To stop receiving these, please contact support.`,
           })
         )
     );

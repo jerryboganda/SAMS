@@ -57,6 +57,12 @@ export const resetDevices = asyncHandler(async (req, res) => {
   ok(res, data);
 });
 
+export const anonymize = asyncHandler(async (req, res) => {
+  const { id } = validateBody(idParamSchema, req.params);
+  const data = await adminStudentService.anonymizeStudentAccount(id);
+  ok(res, data);
+});
+
 export const listLoginEvents = asyncHandler(async (req, res) => {
   const { id } = validateBody(idParamSchema, req.params);
   const data = await adminStudentService.listLoginEventsForStudent(id);
@@ -88,6 +94,7 @@ export default {
   updateStatus,
   listDevices,
   resetDevices,
+  anonymize,
   listLoginEvents,
   listOrders,
   listEnrollments,

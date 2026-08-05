@@ -31,6 +31,16 @@ module.exports = {
     database: process.env.DB_NAME_test || 'sams_academy_test',
     logging: false,
   },
+  // Phase 12.4 perf-suite DB (docs/07_EXECUTION_PLAN.md) — a THIRD, dedicated
+  // database for server/scripts/perf/*'s synthetic 10k-question/1k-user load,
+  // migrated fresh by those scripts themselves via `sequelize-cli --env perf`
+  // (same shell-out mechanism server/tests/globalSetup.cjs already uses for
+  // `--env test`). Never assumed to pre-exist; never touches DB_NAME/DB_NAME_test.
+  perf: {
+    ...base,
+    database: process.env.DB_NAME_PERF || 'sams_academy_perf',
+    logging: false,
+  },
   production: {
     ...base,
     database: process.env.DB_NAME || 'sams_academy',

@@ -46,3 +46,9 @@ Thumbs.db
 
 # Local tool state (Serena, etc.) — not part of the project deliverable
 .serena/
+
+# Phase 12.4 perf suite's raw JSON result cache (server/scripts/perf/runPerfSuite.js)
+# — an intermediate artifact used to build docs/PERF_REPORT.md's before/after
+# comparison; the committed deliverable is that generated markdown file, not
+# this cache.
+server/scripts/perf/.perf-results/

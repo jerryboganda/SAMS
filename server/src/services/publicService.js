@@ -7,6 +7,7 @@
 import { fn, col } from 'sequelize';
 import { ApiError } from '../utils/apiError.js';
 import { sendMail, contactMessageAdminAlertTemplate } from '../utils/mailer.js';
+import { sanitizePlainText } from '../utils/sanitize.js';
 import { env } from '../config/env.js';
 import {
   PUBLIC_HOME_FEATURED_COURSES_LIMIT,
@@ -312,14 +313,41 @@ export async function getPage(key) {
 // POST /public/contact
 // ---------------------------------------------------------------------------
 
+/**
+ * PUBLIC, anonymous-visitor-submitted content — later rendered in the admin
+ * Contact Inbox, so arguably higher risk than admin-authored content since
+ * it's untrusted-by-default. `name`/`subject`/`message` are all sanitized
+ * plain-text-only (no formatting need for a contact message; docs/10_SECURITY_CHECKLIST.md
+ * §G). `email` is left as-is: zod's `.email()` format check already rejects
+ * any value containing `<`/`>` before this ever runs.
+ */
 export async function submitContact({ name, email, subject, message }) {
-  await ContactMessage.create({ name, email, subject: subject || null, message, status: 'new' });
+  const sanitizedName = sanitizePlainText(name);
+  const sanitizedSubject = sanitizePlainText(subject);
+  const sanitizedMessage = sanitizePlainText(message);
+
+  await ContactMessage.create({
+    name: sanitizedName,
+    email,
+    subject: sanitizedSubject || null,
+    message: sanitizedMessage,
+    status: 'new',
+  });
 
   // Never let mail delivery failure fail the request — sendMail() already
   // never throws (server/src/utils/mailer.js), but the contact row is
   // created first regardless so the message is never lost even if mail is
-  // misconfigured.
-  await sendMail(contactMessageAdminAlertTemplate({ adminEmail: env.ADMIN_ALERT_EMAIL, name, email, subject, message }));
+  // misconfigured. Uses the same sanitized values as the stored row (single
+  // source of truth) rather than the raw request body.
+  await sendMail(
+    contactMessageAdminAlertTemplate({
+      adminEmail: env.ADMIN_ALERT_EMAIL,
+      name: sanitizedName,
+      email,
+      subject: sanitizedSubject,
+      message: sanitizedMessage,
+    })
+  );
 
   return {
     success: true,

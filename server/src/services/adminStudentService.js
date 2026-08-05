@@ -5,9 +5,11 @@
 // deviceService.js#listDevicesForUser for the devices list,
 // orderService.js's ORDER_ASSOCIATIONS/serializeOrder for the orders list.
 // Layering: routes -> controllers -> services -> models (CLAUDE.md §4).
+import bcrypt from 'bcrypt';
 import { Op, fn, col } from 'sequelize';
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
+import { randomTokenHex } from '../utils/crypto.js';
 import { serializeUser } from './authService.js';
 import { listDevicesForUser } from './deviceService.js';
 import { ORDER_ASSOCIATIONS, serializeOrder } from './orderService.js';
@@ -15,6 +17,10 @@ import { ORDER_ASSOCIATIONS, serializeOrder } from './orderService.js';
 const { User, UserDevice, RefreshToken, LoginEvent, Order, Enrollment, Course, sequelize } = db;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+// Matches authService.js's own BCRYPT_ROUNDS exactly (not exported from
+// there — duplicated here rather than restructuring a shared foundational
+// Phase 2 file for this one admin-only call site).
+const BCRYPT_ROUNDS = 12;
 
 async function assertStudentExists(id) {
   const student = await User.findOne({ where: { id, role: 'student' } });
@@ -145,6 +151,59 @@ export async function resetDevicesForStudent(id) {
   await UserDevice.update({ isActive: false }, { where: { userId: id, isActive: true } });
   await RefreshToken.update({ revokedAt: new Date() }, { where: { userId: id, revokedAt: null } });
   return { success: true, message: 'All device slots and active sessions have been reset for this student.' };
+}
+
+// ---------------------------------------------------------------------------
+// POST /admin/students/:id/anonymize — docs/10_SECURITY_CHECKLIST.md §I
+// ---------------------------------------------------------------------------
+
+/**
+ * Privacy / right-to-be-forgotten action — Phase 12.5 security-audit finding
+ * M-3: no admin-anonymize-user path existed anywhere in this codebase before
+ * this, despite docs/10_SECURITY_CHECKLIST.md §I explicitly requiring one
+ * ("deletion path: admin can anonymize a user (email->hash, name->'Deleted
+ * user') preserving financial records"). Deliberately NOT a hard delete:
+ * every Order/Enrollment/AuditLog/TestSession/LoginEvent row this user is
+ * party to is left completely untouched — their `user_id`/`userId` FK
+ * references remain valid, so revenue reports, audit history, and exam
+ * history are all preserved exactly as the checklist requires. Only the PII
+ * on the `users` row itself is scrubbed, and every access mechanism is
+ * killed on top of that (password becomes unusable, all devices deactivated,
+ * all refresh tokens revoked, status forced to 'suspended' as defense in
+ * depth alongside the unusable password) so the account can never be logged
+ * into again by anyone, including whoever originally controlled it.
+ *
+ * Idempotent: an already-anonymized account (its email already matches the
+ * deterministic pattern this function itself writes) is detected up front
+ * and returned as a no-op success rather than re-mutating an already-scrubbed
+ * row or erroring on a double-click.
+ */
+export async function anonymizeStudentAccount(id) {
+  const student = await assertStudentExists(id);
+
+  const anonymizedEmail = `deleted-user-${student.id}@anonymized.invalid`;
+  if (student.email === anonymizedEmail) {
+    return serializeUser(student);
+  }
+
+  const unusablePasswordHash = await bcrypt.hash(randomTokenHex(32), BCRYPT_ROUNDS);
+
+  await sequelize.transaction(async (transaction) => {
+    student.name = 'Deleted user';
+    student.email = anonymizedEmail;
+    student.phone = null;
+    student.passwordHash = unusablePasswordHash;
+    student.status = 'suspended';
+    student.twofaEnabled = false;
+    student.twofaSecret = null;
+    student.twofaBackupCodes = null;
+    await student.save({ transaction });
+
+    await UserDevice.update({ isActive: false }, { where: { userId: id, isActive: true }, transaction });
+    await RefreshToken.update({ revokedAt: new Date() }, { where: { userId: id, revokedAt: null }, transaction });
+  });
+
+  return serializeUser(student);
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +426,7 @@ export default {
   updateStudentStatus,
   listDevicesForStudent,
   resetDevicesForStudent,
+  anonymizeStudentAccount,
   listLoginEventsForStudent,
   listOrdersForStudent,
   listEnrollmentsForStudent,

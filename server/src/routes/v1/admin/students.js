@@ -39,6 +39,20 @@ router.post(
   adminStudentController.resetDevices
 );
 
+// docs/10_SECURITY_CHECKLIST.md §I — right-to-be-forgotten: scrubs PII
+// (email->hash, name->"Deleted user") + permanently disables the account
+// (unusable password, all devices/sessions killed) while preserving every
+// Order/Enrollment/AuditLog/TestSession row (financial/audit history intact
+// per the checklist's own wording). Phase 12.5 security-audit finding M-3.
+router.post(
+  '/students/:id/anonymize',
+  audit('student.anonymize', 'User', {
+    entityId: (req) => Number(req.params.id),
+    summary: (req) => `Anonymized student #${req.params.id} (PII scrubbed, account permanently disabled).`,
+  }),
+  adminStudentController.anonymize
+);
+
 router.get('/students/:id/login-events', adminStudentController.listLoginEvents);
 router.get('/students/:id/orders', adminStudentController.listOrders);
 router.get('/students/:id/enrollments', adminStudentController.listEnrollments);

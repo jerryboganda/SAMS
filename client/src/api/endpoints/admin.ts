@@ -169,6 +169,36 @@ export const adminApi = {
     });
   },
 
+  // Phase 12.5 security-audit finding M-3 (docs/10_SECURITY_CHECKLIST.md §I)
+  // — scrubs the student's PII (email->hash, name->"Deleted user") and
+  // permanently disables the account, while preserving every order/
+  // enrollment/audit-log/test-history row untouched.
+  async anonymizeStudent(studentId: number | string): Promise<User> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 350);
+      const student = MOCK_USERS.find((u) => u.id === Number(studentId));
+      if (student) {
+        student.name = "Deleted user";
+        student.email = `deleted-user-${studentId}@anonymized.invalid`;
+        student.phone = undefined;
+        student.status = "suspended";
+      }
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "student.anonymize",
+        entityType: "User",
+        entityId: Number(studentId),
+        summary: `Anonymized student #${studentId} (PII scrubbed, account permanently disabled).`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+      return student as User;
+    }
+    return apiFetch<User>(`/admin/students/${studentId}/anonymize`, { method: "POST" });
+  },
+
   async resetDevice(studentId: number | string) {
     return this.resetStudentDevices(studentId);
   },

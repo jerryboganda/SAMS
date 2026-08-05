@@ -8,11 +8,13 @@
 import { registerQuestionDifficultyCron } from './questionDifficultyCron.js';
 import { registerStatsReconciliationCron } from './statsReconciliationCron.js';
 import { registerEnrollmentLifecycleCron } from './enrollmentLifecycleCron.js';
+import { registerDatabaseBackupCron } from './backupCron.js';
 
 export function registerCronJobs() {
   registerQuestionDifficultyCron();
   registerStatsReconciliationCron();
   registerEnrollmentLifecycleCron();
+  registerDatabaseBackupCron();
 }
 
 export default registerCronJobs;

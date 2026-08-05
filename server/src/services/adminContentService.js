@@ -6,6 +6,7 @@
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
 import { assertExactIdSet } from '../utils/reorder.js';
+import { sanitizePlainText, sanitizeRichText } from '../utils/sanitize.js';
 
 const { Faculty, Faq, ContactMessage, sequelize } = db;
 
@@ -66,11 +67,14 @@ export async function listFaculty() {
   return rows.map(serializeFaculty);
 }
 
+// `name`/`title` are plain-text-only; `bio` is longer-form admin-authored
+// prose that may reasonably want basic formatting (docs/10_SECURITY_CHECKLIST.md
+// §G).
 export async function createFaculty(data) {
   const row = await Faculty.create({
-    name: data.name,
-    title: data.title ?? null,
-    bio: data.bio ?? null,
+    name: sanitizePlainText(data.name),
+    title: sanitizePlainText(data.title) ?? null,
+    bio: sanitizeRichText(data.bio) ?? null,
     photoUrl: data.photoUrl ?? null,
     sortOrder: data.sortOrder ?? (await nextSortOrder(Faculty)),
     isActive: data.isActive ?? true,
@@ -78,12 +82,16 @@ export async function createFaculty(data) {
   return serializeFaculty(row);
 }
 
+const FACULTY_SANITIZERS = { name: sanitizePlainText, title: sanitizePlainText, bio: sanitizeRichText };
+
 export async function updateFaculty(id, data) {
   const row = await Faculty.findByPk(id);
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'Faculty member not found.');
   const patch = {};
   for (const key of ['name', 'title', 'bio', 'photoUrl', 'sortOrder', 'isActive']) {
-    if (data[key] !== undefined) patch[key] = data[key];
+    if (data[key] === undefined) continue;
+    const sanitizer = FACULTY_SANITIZERS[key];
+    patch[key] = sanitizer ? sanitizer(data[key]) : data[key];
   }
   await row.update(patch);
   return serializeFaculty(row);
@@ -123,22 +131,29 @@ export async function listFaqs() {
   return rows.map(serializeFaq);
 }
 
+// `question` is plain-text-only; `answer` is longer-form admin-authored
+// prose that may reasonably want basic formatting (docs/10_SECURITY_CHECKLIST.md
+// §G).
 export async function createFaq(data) {
   const row = await Faq.create({
-    question: data.question,
-    answer: data.answer,
+    question: sanitizePlainText(data.question),
+    answer: sanitizeRichText(data.answer),
     sortOrder: data.sortOrder ?? (await nextSortOrder(Faq)),
     isActive: data.isActive ?? true,
   });
   return serializeFaq(row);
 }
 
+const FAQ_SANITIZERS = { question: sanitizePlainText, answer: sanitizeRichText };
+
 export async function updateFaq(id, data) {
   const row = await Faq.findByPk(id);
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'FAQ item not found.');
   const patch = {};
   for (const key of ['question', 'answer', 'sortOrder', 'isActive']) {
-    if (data[key] !== undefined) patch[key] = data[key];
+    if (data[key] === undefined) continue;
+    const sanitizer = FAQ_SANITIZERS[key];
+    patch[key] = sanitizer ? sanitizer(data[key]) : data[key];
   }
   await row.update(patch);
   return serializeFaq(row);

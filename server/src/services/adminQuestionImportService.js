@@ -26,6 +26,7 @@
 // ... keep dependencies minimal").
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
+import { sanitizePlainText, sanitizeRichText } from '../utils/sanitize.js';
 
 const { Subject, BodySystem, Question, QuestionOption, sequelize } = db;
 
@@ -276,20 +277,36 @@ export async function commitImport(validRows) {
   let importedCount = 0;
   await sequelize.transaction(async (transaction) => {
     for (const row of stillValid) {
+      // Security-audit finding (Phase 12.5): every OTHER admin write path to
+      // this same table (adminQuestionService.js#createQuestionAdmin/
+      // updateQuestionAdmin) sanitizes stem/explanation/optionText before
+      // persistence (docs/10_SECURITY_CHECKLIST.md §G) -- this CSV commit
+      // path was the one write path to questions/question_options that
+      // skipped it entirely. validateRow() above is deliberately left
+      // sanitizing-free (its length/shape checks run against the admin's
+      // own raw input, and dry-run's preview is never persisted -- same
+      // trust boundary as the admin typing directly into a form field); the
+      // sanitize call belongs here, at the actual persistence step, mirroring
+      // where every other write path in this codebase applies it.
       const question = await Question.create(
         {
           examCategory: row.examCategory,
           subjectId: row.subjectId,
           systemId: row.systemId,
-          stem: row.stem,
-          explanation: row.explanation,
+          stem: sanitizePlainText(row.stem),
+          explanation: sanitizeRichText(row.explanation),
           difficulty: row.difficulty,
           isActive: true,
         },
         { transaction }
       );
       await QuestionOption.bulkCreate(
-        row.options.map((o) => ({ questionId: question.id, optionText: o.optionText, isCorrect: o.isCorrect, sortOrder: o.sortOrder })),
+        row.options.map((o) => ({
+          questionId: question.id,
+          optionText: sanitizePlainText(o.optionText),
+          isCorrect: o.isCorrect,
+          sortOrder: o.sortOrder,
+        })),
         { transaction }
       );
       importedCount += 1;
