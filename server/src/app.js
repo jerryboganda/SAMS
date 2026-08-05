@@ -19,10 +19,18 @@ import logger from './utils/logger.js';
 
 const app = express();
 
-// --- Middleware chain: helmet -> cors -> json -> cookies -> hpp -> rateLimit ---
+// --- Middleware chain: helmet -> cors -> json -> urlencoded -> cookies -> hpp -> rateLimit ---
 app.use(helmet());
 app.use(cors({ origin: env.APP_URL, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
+// A real hosted-checkout gateway (JazzCash/EasyPaisa/PayFast/Safepay, Phase
+// 9.3+) POSTs its browser return AND its server-to-server IPN as
+// application/x-www-form-urlencoded, not JSON — express.json() silently
+// leaves req.body === {} for that content-type, which would make every
+// PaymentGateway driver's handleCallback(req) see an empty body (found
+// during Phase 9.3's JazzCash driver work; see DECISIONS.md). extended:true
+// so a gateway that nests fields (none currently do) still parses.
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 app.use(hpp());
 

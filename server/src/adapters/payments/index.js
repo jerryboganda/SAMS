@@ -87,10 +87,11 @@
 import { env } from '../../config/env.js';
 import { ApiError } from '../../utils/apiError.js';
 import mockGateway from './mock.js';
+import jazzcashGateway from './jazzcash.js';
 
 const DRIVERS = {
   mock: mockGateway,
-  // jazzcash: jazzcashGateway,          // docs/07_EXECUTION_PLAN.md 9.3
+  jazzcash: jazzcashGateway, // docs/07_EXECUTION_PLAN.md 9.3
   // easypaisa: easypaisaGateway,        // docs/07_EXECUTION_PLAN.md 9.4
   // raast: raastGateway,                // docs/07_EXECUTION_PLAN.md 9.5 —
   //   manual pseudo-gateway (Settings-sourced manualDetails + proof upload
