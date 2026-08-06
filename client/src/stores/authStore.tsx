@@ -31,7 +31,6 @@ interface AuthContextType {
   deviceLimitError: { message: string } | null;
   requires2FA: boolean;
   login: (emailOrReq: string | LoginRequest, passwordArg?: string) => Promise<User>;
-  register: (data: { name: string; email: string; phone: string; password?: string }) => Promise<User>;
   verify2FA: (code: string) => Promise<User>;
   logout: () => Promise<void>;
   updateUser: (updated: Partial<User>) => void;
@@ -213,27 +212,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const register = async (data: { name: string; email: string; phone: string; password?: string }): Promise<User> => {
-    setIsLoading(true);
-    try {
-      const newUser: User = {
-        id: Date.now(),
-        name: data.name,
-        email: data.email,
-        phone: data.phone,
-        role: "student",
-        status: "active",
-        twofaEnabled: false,
-        createdAt: new Date().toISOString(),
-      };
-      setUser(newUser);
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newUser));
-      return newUser;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const logout = async () => {
     setIsLoading(true);
     try {
@@ -277,7 +255,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deviceLimitError,
         requires2FA,
         login,
-        register,
         verify2FA,
         logout,
         updateUser,

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   ChevronDown,
@@ -7,269 +7,137 @@ import {
   CheckCircle2,
   Clock,
   Layers,
-  BookOpen,
-  Sparkles,
-  Lock,
-  FileText,
   AlertCircle,
 } from "lucide-react";
-import { ProgressBar, Badge, Button } from "../ui";
+import { ProgressBar, Badge, Button, Skeleton, EmptyState } from "../ui";
+import { studentApi } from "../../api/endpoints/student";
+import { ModuleProgress, buildModulesFromSections } from "../../utils/courseModules";
 
-export interface SubSectionProgress {
-  id: number;
-  title: string;
-  description?: string;
-  durationMinutes: number;
-  watchedMinutes: number;
-  isCompleted: boolean;
-  isFreePreview?: boolean;
-}
-
-export interface ModuleProgress {
-  id: number;
-  title: string;
-  subSections: SubSectionProgress[];
-}
+// Re-exported for backward compatibility with any existing import of these types
+// from this component file (this is where they used to be defined).
+export type { SubSectionProgress, ModuleProgress } from "../../utils/courseModules";
 
 interface CourseModuleBreakdownProps {
   courseId: number;
   courseTitle: string;
+  /**
+   * Explicit override — when a caller already has real curriculum data on
+   * hand (e.g. from its own `GET /student/courses/:courseId` fetch), it can
+   * pass the transformed real modules directly and this component will skip
+   * its own fetch. When omitted (the common case — neither CourseCard's
+   * expandable panel nor MyCoursesPage's "Module Breakdown" tab have full
+   * curriculum data up front, only the enrollment list), this component
+   * fetches its own real data for `courseId` on mount. Since this component
+   * is only ever mounted lazily (behind a "Module Progress" toggle in
+   * CourseCard, or when the user selects the "Module Breakdown" tab in
+   * MyCoursesPage — never eagerly for every enrollment on initial page
+   * load), self-fetching here does not create an N+1 storm: at most one
+   * request per course the user actually chose to expand/view, bounded by
+   * their own real enrollment count.
+   */
   modules?: ModuleProgress[];
   initiallyExpanded?: boolean;
 }
 
-// Default realistic medical module progress data if not explicitly passed
-const DEFAULT_COURSE_MODULES: Record<number, ModuleProgress[]> = {
-  1: [
-    {
-      id: 101,
-      title: "Module 1: Cardiovascular Pathology & Pharmacology",
-      subSections: [
-        {
-          id: 1001,
-          title: "Sub-section 1.1: Myocardial Infarction & Ischemic Heart Disease",
-          description: "ECG ST-segment elevation, troponin I/T kinetics, emergency PCI vs thrombolysis.",
-          durationMinutes: 45,
-          watchedMinutes: 45,
-          isCompleted: true,
-          isFreePreview: true,
-        },
-        {
-          id: 1002,
-          title: "Sub-section 1.2: Antiarrhythmic Drugs & Cardiac Electrophysiology",
-          description: "Vaughan Williams Classes I-IV, QT prolongation risks, and AV nodal reentrant tachycardia.",
-          durationMinutes: 53,
-          watchedMinutes: 25,
-          isCompleted: false,
-        },
-        {
-          id: 1003,
-          title: "Sub-section 1.3: Valvular Heart Diseases, Murmurs & Heart Failure",
-          description: "Aortic stenosis vs mitral regurgitation maneuvers, NYHA functional classes, sacubitril/valsartan.",
-          durationMinutes: 48,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-      ],
-    },
-    {
-      id: 102,
-      title: "Module 2: Respiratory System & Pulmonology Pathology",
-      subSections: [
-        {
-          id: 1004,
-          title: "Sub-section 2.1: Obstructive vs Restrictive Lung Diseases",
-          description: "FEV1/FVC ratio analysis, GOLD COPD guidelines, idiopathic pulmonary fibrosis HRCT.",
-          durationMinutes: 51,
-          watchedMinutes: 51,
-          isCompleted: true,
-        },
-        {
-          id: 1005,
-          title: "Sub-section 2.2: Pneumonia, Tuberculosis & Pleural Effusions",
-          description: "CURB-65 pneumonia risk score, RIFES anti-TB regimens, Light's exudate vs transudate criteria.",
-          durationMinutes: 56,
-          watchedMinutes: 10,
-          isCompleted: false,
-        },
-        {
-          id: 1006,
-          title: "Sub-section 2.3: Pulmonary Embolism & Arterial Blood Gas (ABG) Interpretation",
-          description: "Wells score, D-dimer, CTA pulmonary angiogram, respiratory vs metabolic acidosis/alkalosis.",
-          durationMinutes: 42,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-      ],
-    },
-    {
-      id: 103,
-      title: "Module 3: Gastroenterology & Hepatology",
-      subSections: [
-        {
-          id: 1007,
-          title: "Sub-section 3.1: Inflammatory Bowel Diseases (Crohn's vs Ulcerative Colitis)",
-          description: "Skip lesions, non-caseating granulomas, ASCA vs p-ANCA, biological therapy strategies.",
-          durationMinutes: 46,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-        {
-          id: 1008,
-          title: "Sub-section 3.2: Cirrhosis, Portal Hypertension & Liver Failure",
-          description: "Child-Pugh & MELD scoring, esophageal varices band ligation, hepatic encephalopathy.",
-          durationMinutes: 52,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-      ],
-    },
-    {
-      id: 104,
-      title: "Module 4: Renal System & Nephrology",
-      subSections: [
-        {
-          id: 1009,
-          title: "Sub-section 4.1: Glomerulonephritis & Nephrotic Syndromes",
-          description: "Minimal change disease, FSGS, IgA nephropathy, electron microscopy basement membrane findings.",
-          durationMinutes: 50,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-        {
-          id: 1010,
-          title: "Sub-section 4.2: Acute Kidney Injury (AKI) & Electrolyte Imbalances",
-          description: "Prerenal azotemia vs ATN, fractional excretion of sodium (FENa), hyperkalemia EKG changes.",
-          durationMinutes: 48,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-      ],
-    },
-  ],
-  2: [
-    {
-      id: 201,
-      title: "Module 1: Internal Medicine High-Yield Review for SMLE",
-      subSections: [
-        {
-          id: 2001,
-          title: "Sub-section 1.1: Hypertension & Heart Failure Management",
-          description: "2026 ACC/AHA blood pressure targets, ARNI therapy, SGLT2 inhibitors in CHF.",
-          durationMinutes: 40,
-          watchedMinutes: 40,
-          isCompleted: true,
-        },
-        {
-          id: 2002,
-          title: "Sub-section 1.2: Diabetes Mellitus & Diabetic Ketoacidosis (DKA)",
-          description: "HbA1c goals, basal-bolus insulin regimens, fluid resuscitation protocols in DKA.",
-          durationMinutes: 45,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-      ],
-    },
-    {
-      id: 202,
-      title: "Module 2: General Surgery & Emergency Trauma",
-      subSections: [
-        {
-          id: 2003,
-          title: "Sub-section 2.1: Acute Abdomen & Appendicitis Workup",
-          description: "Alvarado score, CT abdominal findings, laparoscopic appendectomy surgical principles.",
-          durationMinutes: 38,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-        {
-          id: 2004,
-          title: "Sub-section 2.2: Trauma Resuscitation & FAST Ultrasound",
-          description: "ATLS primary and secondary survey, massive transfusion protocol, pericardiocentesis.",
-          durationMinutes: 42,
-          watchedMinutes: 0,
-          isCompleted: false,
-        },
-      ],
-    },
-  ],
-  3: [
-    {
-      id: 301,
-      title: "Module 1: Clinical History Taking & Physical Examination",
-      subSections: [
-        {
-          id: 3001,
-          title: "Sub-section 1.1: Cardiovascular Examination & Auscultation",
-          description: "JVP assessment, S1/S2 splitting, murmur grading, peripheral arterial disease checks.",
-          durationMinutes: 35,
-          watchedMinutes: 35,
-          isCompleted: true,
-        },
-        {
-          id: 3002,
-          title: "Sub-section 1.2: Neurological Examination & Cranial Nerves",
-          description: "CN I-XII examination techniques, motor tone, upper vs lower motor neuron signs.",
-          durationMinutes: 40,
-          watchedMinutes: 40,
-          isCompleted: true,
-        },
-      ],
-    },
-    {
-      id: 302,
-      title: "Module 2: Diagnostic Imaging & ECG Fundamentals",
-      subSections: [
-        {
-          id: 3003,
-          title: "Sub-section 2.1: Chest X-Ray Systematic Interpretation",
-          description: "ABCDE method: Airway, Bones, Cardiac silhouette, Diaphragm, Everything else.",
-          durationMinutes: 30,
-          watchedMinutes: 30,
-          isCompleted: true,
-        },
-        {
-          id: 3004,
-          title: "Sub-section 2.2: 12-Lead ECG Waveform Analysis",
-          description: "Rate, rhythm, axis calculation, ischemia vs infarction patterns, bundle branch blocks.",
-          durationMinutes: 45,
-          watchedMinutes: 45,
-          isCompleted: true,
-        },
-      ],
-    },
-  ],
-};
+type LoadState = "loading" | "error" | "empty" | "data";
 
 export const CourseModuleBreakdown: React.FC<CourseModuleBreakdownProps> = ({
   courseId,
   courseTitle,
-  modules = DEFAULT_COURSE_MODULES[courseId] || DEFAULT_COURSE_MODULES[1],
+  modules: modulesOverride,
   initiallyExpanded = false,
 }) => {
   const [isCourseExpanded, setIsCourseExpanded] = useState(initiallyExpanded);
-  const [expandedModuleId, setExpandedModuleId] = useState<number | null>(modules[0]?.id || null);
+  const [expandedModuleId, setExpandedModuleId] = useState<number | null>(
+    modulesOverride?.[0]?.id ?? null
+  );
+  const [loadState, setLoadState] = useState<LoadState>(modulesOverride ? "data" : "loading");
+  const [loadErrorMsg, setLoadErrorMsg] = useState("");
+  const [fetchedModules, setFetchedModules] = useState<ModuleProgress[]>(modulesOverride || []);
+
+  const loadModules = useCallback(async () => {
+    setLoadState("loading");
+    setLoadErrorMsg("");
+    try {
+      const data = await studentApi.getEnrolledCourseDetails(courseId);
+      const built = buildModulesFromSections(data.sections || []);
+      setFetchedModules(built);
+      setLoadState(built.length > 0 ? "data" : "empty");
+    } catch (err: any) {
+      console.error("Failed to load module breakdown", err);
+      setLoadErrorMsg(err?.message || "Failed to load this course's module breakdown.");
+      setLoadState("error");
+    }
+  }, [courseId]);
+
+  useEffect(() => {
+    // Caller already supplied real data — nothing to fetch.
+    if (modulesOverride) return;
+    loadModules();
+  }, [loadModules, modulesOverride]);
+
+  const modules = modulesOverride ?? fetchedModules;
+
+  // Auto-expand the first module once real data actually arrives (mirrors the
+  // previous synchronous-fixture behavior, now safe for async-loaded data).
+  useEffect(() => {
+    if (expandedModuleId === null && modules.length > 0) {
+      setExpandedModuleId(modules[0].id);
+    }
+  }, [modules, expandedModuleId]);
 
   // Compute Overall Course Completion Metrics across modules and sub-sections
   let totalCourseMinutes = 0;
   let totalWatchedMinutes = 0;
   let totalSubSectionsCount = 0;
-  let completedSubSectionsCount = 0;
 
   modules.forEach((mod) => {
     mod.subSections.forEach((sub) => {
       totalCourseMinutes += sub.durationMinutes;
       totalWatchedMinutes += sub.watchedMinutes;
       totalSubSectionsCount += 1;
-      if (sub.isCompleted || sub.watchedMinutes >= sub.durationMinutes) {
-        completedSubSectionsCount += 1;
-      }
     });
   });
 
   const overallCoursePercent = totalCourseMinutes > 0
     ? Math.round((totalWatchedMinutes / totalCourseMinutes) * 100)
     : 0;
+
+  if (loadState === "loading") {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs p-4 sm:p-5 space-y-3">
+        <Skeleton variant="text" className="h-5 w-2/3" />
+        <Skeleton variant="text" className="h-3 w-1/3" />
+        <Skeleton variant="card" className="h-16 rounded-xl" />
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="bg-white rounded-2xl border border-rose-200 overflow-hidden shadow-xs p-4 sm:p-5">
+        <EmptyState
+          icon={<AlertCircle className="w-8 h-8 text-rose-500" />}
+          title="Couldn't load module breakdown"
+          description={loadErrorMsg}
+          actionLabel="Retry"
+          onAction={loadModules}
+        />
+      </div>
+    );
+  }
+
+  if (loadState === "empty") {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs p-4 sm:p-5">
+        <EmptyState
+          icon={<Layers className="w-8 h-8 text-slate-400" />}
+          title="No modules published yet"
+          description={`${courseTitle} doesn't have any curriculum sections published yet.`}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs space-y-0">
@@ -392,7 +260,7 @@ export const CourseModuleBreakdown: React.FC<CourseModuleBreakdownProps> = ({
                         Sub-section Video Lessons ({moduleItem.subSections.length})
                       </span>
 
-                      {moduleItem.subSections.map((subItem, subIdx) => {
+                      {moduleItem.subSections.map((subItem) => {
                         const subPercent = subItem.durationMinutes > 0
                           ? Math.round((subItem.watchedMinutes / subItem.durationMinutes) * 100)
                           : 0;

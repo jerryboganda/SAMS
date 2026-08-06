@@ -16,8 +16,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Card, Button, Badge, ProgressBar, ToastSystem } from "../../components/ui";
-import { studentApi } from "../../api/endpoints/student";
-import { Course, CourseSection, Lecture } from "../../types";
+import { studentApi, CourseCurriculumEnrollment } from "../../api/endpoints/student";
+import { Course, CourseSection } from "../../types";
 import { MOCK_COURSES, MOCK_SECTIONS } from "../../mock-data";
 
 export const CourseHomePage: React.FC = () => {
@@ -27,12 +27,17 @@ export const CourseHomePage: React.FC = () => {
 
   const [course, setCourse] = useState<Course | null>(null);
   const [sections, setSections] = useState<CourseSection[]>([]);
-  const [progressPercent, setProgressPercent] = useState(42);
+  const [progressPercent, setProgressPercent] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  // Real per-enrollment/watch-time/QBank stats (Fix 5 — server/src/services/studentCourseService.js
+  // #getCourseCurriculum). `null`/`0` (never a fabricated placeholder) until the real response lands.
+  const [enrollmentInfo, setEnrollmentInfo] = useState<CourseCurriculumEnrollment | null>(null);
+  const [totalWatchedSeconds, setTotalWatchedSeconds] = useState(0);
+  const [qbankQuestionsCount, setQbankQuestionsCount] = useState(0);
 
   // Accordion state (open section IDs)
   const [openSectionIds, setOpenSectionIds] = useState<number[]>([]);
-  const [bookmarkedLectureIds, setBookmarkedLectureIds] = useState<number[]>([1002]);
+  const [bookmarkedLectureIds, setBookmarkedLectureIds] = useState<number[]>([]);
   const [toastMessage, setToastMessage] = useState("");
 
   const activeResumeLectureId = 1002; // Lecture 2 marked as current resume lecture
@@ -51,6 +56,16 @@ export const CourseHomePage: React.FC = () => {
         setSections(loadedSections);
         setOpenSectionIds(loadedSections.map((s) => s.id));
         if (data.progressPercent !== undefined) setProgressPercent(data.progressPercent);
+        setEnrollmentInfo(data.enrollment ?? null);
+        setTotalWatchedSeconds(data.totalWatchedSeconds ?? 0);
+        setQbankQuestionsCount(data.qbankQuestionsCount ?? 0);
+
+        // Real bookmark state (Fix 5) — every lecture already carries a real `isBookmarked`
+        // flag from this same response (server/src/services/studentCourseService.js
+        // #serializeCurriculumLecture); never a hardcoded initial guess.
+        setBookmarkedLectureIds(
+          loadedSections.flatMap((s) => (s.lectures || []).filter((l) => l.isBookmarked).map((l) => l.id))
+        );
       } catch (err) {
         console.error("Error loading course details", err);
         setCourse(MOCK_COURSES[0]);
@@ -69,14 +84,24 @@ export const CourseHomePage: React.FC = () => {
     );
   };
 
-  const handleBookmarkToggle = (e: React.MouseEvent, lectureId: number, title: string) => {
+  const handleBookmarkToggle = async (e: React.MouseEvent, lectureId: number, title: string) => {
     e.stopPropagation();
-    if (bookmarkedLectureIds.includes(lectureId)) {
-      setBookmarkedLectureIds((prev) => prev.filter((id) => id !== lectureId));
-      setToastMessage(`Removed bookmark for '${title}'`);
-    } else {
-      setBookmarkedLectureIds((prev) => [...prev, lectureId]);
-      setToastMessage(`Bookmarked '${title}'`);
+    const isCurrentlyBookmarked = bookmarkedLectureIds.includes(lectureId);
+
+    // Optimistic update, reverted below if the real call fails.
+    setBookmarkedLectureIds((prev) =>
+      isCurrentlyBookmarked ? prev.filter((id) => id !== lectureId) : [...prev, lectureId]
+    );
+
+    try {
+      const result = await studentApi.toggleLectureBookmark(lectureId, isCurrentlyBookmarked);
+      setToastMessage(result.isBookmarked ? `Bookmarked '${title}'` : `Removed bookmark for '${title}'`);
+    } catch (err) {
+      console.error("Failed to toggle lecture bookmark", err);
+      setBookmarkedLectureIds((prev) =>
+        isCurrentlyBookmarked ? [...prev, lectureId] : prev.filter((id) => id !== lectureId)
+      );
+      setToastMessage("Couldn't update bookmark. Please try again.");
     }
   };
 
@@ -89,7 +114,7 @@ export const CourseHomePage: React.FC = () => {
   // Calculate totals
   const allLectures = sections.flatMap((s) => s.lectures || []);
   const completedCount = allLectures.filter((l) => l.isCompleted).length;
-  const totalLecturesCount = allLectures.length || 28;
+  const totalLecturesCount = allLectures.length;
 
   return (
     <div className="space-y-8 pb-12">
@@ -113,7 +138,13 @@ export const CourseHomePage: React.FC = () => {
           <div className="space-y-2 max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="navy">{course?.examCategory || "NRE Step 1"}</Badge>
-              <Badge variant="teal">140 Days Validity Remaining</Badge>
+              {enrollmentInfo && (
+                <Badge variant={enrollmentInfo.remainingDays > 0 ? "teal" : "danger"}>
+                  {enrollmentInfo.remainingDays > 0
+                    ? `${enrollmentInfo.remainingDays} Days Validity Remaining`
+                    : "Subscription Expired"}
+                </Badge>
+              )}
               <Badge variant="outline" className="text-slate-600">SAMS DRM PROTECTED</Badge>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-[#0E2A47] leading-tight">
@@ -270,19 +301,30 @@ export const CourseHomePage: React.FC = () => {
 
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
                 <span className="text-slate-600 font-medium">Watch Time</span>
-                <span className="font-extrabold text-[#0E2A47]">18.5 / 20.0 Hours</span>
+                <span className="font-extrabold text-[#0E2A47]">
+                  {course?.totalDurationSeconds
+                    ? `${(totalWatchedSeconds / 3600).toFixed(1)} / ${(course.totalDurationSeconds / 3600).toFixed(1)} Hours`
+                    : "—"}
+                </span>
               </div>
 
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
                 <span className="text-slate-600 font-medium">Linked QBank Questions</span>
                 <span className="font-extrabold text-emerald-600 flex items-center gap-1">
-                  <FileQuestion className="w-3.5 h-3.5" /> 60+ Vignettes
+                  <FileQuestion className="w-3.5 h-3.5" />
+                  {qbankQuestionsCount > 0 ? `${qbankQuestionsCount} Vignettes` : "Not Included"}
                 </span>
               </div>
 
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
                 <span className="text-slate-600 font-medium">Subscription Status</span>
-                <Badge variant="teal" size="sm">140 Days Remaining</Badge>
+                <Badge variant={enrollmentInfo && enrollmentInfo.remainingDays > 0 ? "teal" : "danger"} size="sm">
+                  {enrollmentInfo
+                    ? enrollmentInfo.remainingDays > 0
+                      ? `${enrollmentInfo.remainingDays} Days Remaining`
+                      : "Expired"
+                    : "—"}
+                </Badge>
               </div>
             </div>
 

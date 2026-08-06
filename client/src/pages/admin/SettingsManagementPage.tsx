@@ -21,6 +21,7 @@ export const SettingsManagementPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<"success" | "danger">("success");
 
   // Form States
   const [siteForm, setSiteForm] = useState({
@@ -79,7 +80,7 @@ export const SettingsManagementPage: React.FC = () => {
     refundPolicy: `# Refund & Cancellation Policy\n\nSAMS Academy offers premium medical preparation courses. Please review our policy prior to enrollment...`,
   });
 
-  const [testEmailAddress, setTestEmailAddress] = useState("doctor.test@samsacademy.com");
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
 
   const loadSettings = async () => {
     setLoading(true);
@@ -107,11 +108,29 @@ export const SettingsManagementPage: React.FC = () => {
     setSubmitting(true);
     try {
       await adminApi.updateSettings(section, formData);
+      setToastType("success");
       setToastMessage(`Saved ${section.toUpperCase()} configuration successfully.`);
     } catch (err) {
       console.error(err);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Real POST /admin/settings/smtp/test (Phase 13.3 — server/src/services/adminSettingsService.js
+  // #sendSmtpTest). The endpoint always sends to the CALLING admin's own account email — never an
+  // arbitrary attacker-supplied address — so there's no "recipient" field to collect here.
+  const handleSendTestEmail = async () => {
+    setIsSendingTestEmail(true);
+    try {
+      const res = await adminApi.sendTestEmail("");
+      setToastType("success");
+      setToastMessage(res.message || "Test email sent successfully.");
+    } catch (err: any) {
+      setToastType("danger");
+      setToastMessage(err?.message || "Could not send the test email. Check your SMTP settings and try again.");
+    } finally {
+      setIsSendingTestEmail(false);
     }
   };
 
@@ -133,7 +152,9 @@ export const SettingsManagementPage: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-12 max-w-5xl mx-auto">
-      {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
+      {toastMessage && (
+        <Toast message={toastMessage} type={toastType} onClose={() => setToastMessage(null)} />
+      )}
 
       <div className="border-b border-slate-200 pb-4">
         <h1 className="text-2xl font-extrabold text-[#0E2A47]">System Configuration & Settings</h1>
@@ -514,37 +535,33 @@ export const SettingsManagementPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Send Test Email Section — backend endpoint not built yet
-              (POST /admin/settings/smtp/test is out of scope for this
-              round, see DECISIONS.md), so this action is disabled with a
-              clear "not yet available" treatment rather than wired to a
-              404. */}
+          {/* Send Test Email Section — wired to the real POST /admin/settings/smtp/test
+              (server/src/services/adminSettingsService.js#sendSmtpTest). That endpoint always
+              sends to the calling admin's own account email (never an arbitrary address), so
+              there's no recipient field to collect here. */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 pt-4">
             <h4 className="text-xs font-bold text-[#0E2A47] flex items-center gap-1.5">
               <Send className="w-4 h-4 text-[#0FA3A3]" /> Send Test Email
             </h4>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="email"
-                value={testEmailAddress}
-                onChange={(e) => setTestEmailAddress(e.target.value)}
-                placeholder="Enter recipient email address..."
-                disabled
-                className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-[#0FA3A3] focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
-              />
+            <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+              <p className="flex-1 text-[11px] text-slate-500">
+                Sends a real test email through your currently-configured SMTP settings to your own
+                admin account's registered email address.
+              </p>
               <Button
                 variant="outline"
                 size="sm"
                 icon={<Send className="w-3.5 h-3.5" />}
-                disabled
-                title="Live SMTP test-send isn't available yet in this deployment."
+                disabled={isSendingTestEmail}
+                isLoading={isSendingTestEmail}
+                onClick={handleSendTestEmail}
               >
-                Send Test Email (Coming Soon)
+                {isSendingTestEmail ? "Sending..." : "Send Test Email"}
               </Button>
             </div>
             <p className="text-[10px] text-slate-400">
-              Live SMTP test-sending isn't wired up yet. Save your settings above, then verify delivery via a real
-              password-reset or verification email instead.
+              Save your SMTP settings above first if you've changed them — this test uses the app's live
+              mail transport configuration, not the unsaved form values.
             </p>
           </div>
 

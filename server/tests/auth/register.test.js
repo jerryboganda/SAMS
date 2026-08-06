@@ -55,6 +55,27 @@ describe('POST /api/v1/auth/register', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
+  // docs/08_TESTING_QA.md's "weak password 422" row — the real, actual rule
+  // (server/src/controllers/authController.js's `passwordField`) is a plain
+  // `z.string().min(8).max(72)`, no complexity requirement beyond length. A
+  // *present-but-short* password (7 chars, one under the minimum) must be
+  // rejected exactly like a missing one — previously only the missing-field
+  // case above was ever exercised.
+  test('validation failure: weak (too-short) password → 422 VALIDATION_ERROR, and no user is created', async () => {
+    const email = uniqueEmail('register-weakpw');
+
+    const res = await request(app)
+      .post('/api/v1/auth/register')
+      .send({ name: 'Weak Password', email, password: 'short1' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+
+    const user = await User.findOne({ where: { email } });
+    expect(user).toBeNull();
+  });
+
   test('edge: duplicate email responds identically (no user enumeration) and does not create a second user', async () => {
     const email = uniqueEmail('register-dupe');
     const firstRes = await request(app)

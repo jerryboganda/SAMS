@@ -12,7 +12,7 @@ import { ApiError } from '../utils/apiError.js';
 import { serializeCourse } from './publicService.js';
 import db from '../models/index.js';
 
-const { Enrollment, Course, CourseSection, Lecture, LectureProgress, LectureBookmark } = db;
+const { Enrollment, Course, CourseSection, Lecture, LectureProgress, LectureBookmark, Question } = db;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -88,6 +88,14 @@ function serializeEnrollment(enrollment, progressByCourseId) {
     courseId: enrollment.courseId,
     courseTitle: enrollment.course ? enrollment.course.title : undefined,
     courseThumbnail: enrollment.course ? enrollment.course.thumbnailUrl : undefined,
+    // Real `courses.slug` (Phase 13.3) — client/src/components/student/
+    // CourseCard.tsx's "Renew Subscription" link needs a real per-course
+    // slug for its `/checkout/:slug` href; it previously had no real field
+    // to read this from and fell back to a single hardcoded guess
+    // ("nre-step-1-complete") for EVERY expired course regardless of which
+    // course it actually was. See DECISIONS.md's repeated "never show a
+    // plausible-looking fake value" lesson.
+    courseSlug: enrollment.course ? enrollment.course.slug : undefined,
     orderId: enrollment.orderId ?? undefined,
     source: enrollment.source,
     startsAt: enrollment.startsAt,
@@ -208,6 +216,45 @@ function serializeCurriculumLecture(lecture, progressByLectureId, bookmarkedLect
  * services/videoService.js#loadPlayableLecture (an unpublished course's
  * existence is never distinguishable from a nonexistent id, even to a
  * formerly/currently-enrolled student).
+ *
+ * Phase 13.3 additions — closing 2 of the 3 flagged fabricated-data items
+ * (client/src/pages/student/CourseHomePage.tsx and
+ * client/src/components/student/CourseModuleBreakdown.tsx; see DECISIONS.md's
+ * repeated "never show a plausible-looking fake number" lesson). The 3rd
+ * item (per-section/per-module lecture-count + percent-complete breakdown)
+ * needed NO backend change at all — `sections[].lectures[]` already carries
+ * every real per-lecture field (`durationSeconds`, `watchedSeconds`,
+ * `isCompleted`, `isFreePreview`) needed to compute a per-section
+ * lecture-count/completed-count/percent breakdown client-side, the exact
+ * same aggregation CourseModuleBreakdown.tsx already performs today over its
+ * hardcoded `DEFAULT_COURSE_MODULES` fallback — only the frontend-side data
+ * source needs to change (a follow-up frontend pass's job), not this
+ * endpoint's shape.
+ *   - `enrollment.remainingDays`/`enrollment.expiresAt`: the SAME
+ *     `remainingDaysFrom()` helper GET /student/courses already uses for
+ *     every other enrollment card — validity days remaining for THIS
+ *     specific enrolled course, not a hardcoded "140 Days Validity
+ *     Remaining" badge.
+ *   - `totalWatchedSeconds`: real sum of every lecture's `watchedSeconds`
+ *     for this user in this course (from the SAME per-lecture progress rows
+ *     already loaded for `sections[].lectures[]` below — no extra query).
+ *     Paired with the already-existing `course.totalDurationSeconds` (see
+ *     serializeCourse/publicService.js) for a real "X of Y hours watched"
+ *     stat — both numbers are now real, neither is new to compute but only
+ *     the watched half was previously missing from this response.
+ *   - `qbankQuestionsCount`: real count of active Question rows sharing this
+ *     course's `examCategory` (the same taxonomy the QBank engine itself
+ *     gates access by — see qbankService.js#getAccessibleExamCategories;
+ *     there is no direct question<->course foreign key in this schema, only
+ *     the shared examCategory, which is the correct/only real proxy for
+ *     "vignettes linked to this course"). Always 0 when
+ *     `course.includesQbank` is false — a video-only course has no linked
+ *     QBank content, matching the same includesQbank gate the rest of the
+ *     QBank engine uses.
+ *
+ * Query budget: +1 query (the qbankQuestionsCount count) over the prior
+ * 5-query budget = 6 total; `enrollment`/`totalWatchedSeconds` are computed
+ * from data already being fetched, no additional queries.
  */
 export async function getCourseCurriculum(userId, courseId) {
   const course = await Course.findOne({ where: { id: courseId, isPublished: true } });
@@ -215,7 +262,7 @@ export async function getCourseCurriculum(userId, courseId) {
     throw new ApiError(404, 'NOT_FOUND', 'Course not found.');
   }
 
-  await assertEnrolledInCourse(userId, courseId);
+  const activeEnrollment = await assertEnrolledInCourse(userId, courseId);
 
   const sections = await CourseSection.findAll({
     where: { courseId },
@@ -241,12 +288,14 @@ export async function getCourseCurriculum(userId, courseId) {
   let lecturesCount = 0;
   let completedCount = 0;
   let totalDurationSeconds = 0;
+  let totalWatchedSeconds = 0;
   const serializedSections = sections.map((section) => {
     const lectures = (section.lectures || []).map((lecture) => {
       lecturesCount += 1;
       totalDurationSeconds += lecture.durationSeconds || 0;
       const progress = progressByLectureId.get(lecture.id);
       if (progress && progress.isCompleted) completedCount += 1;
+      totalWatchedSeconds += progress ? progress.watchedSeconds || 0 : 0;
       return serializeCurriculumLecture(lecture, progressByLectureId, bookmarkedLectureIds);
     });
     return {
@@ -260,10 +309,26 @@ export async function getCourseCurriculum(userId, courseId) {
 
   const progressPercent = lecturesCount > 0 ? Math.round((completedCount / lecturesCount) * 100) : 0;
 
+  // See this function's doc comment above for why examCategory (not a
+  // direct FK) is the correct real proxy for "QBank questions linked to
+  // this course", and why includesQbank=false always yields 0.
+  const qbankQuestionsCount = course.includesQbank
+    ? await Question.count({ where: { examCategory: course.examCategory, isActive: true } })
+    : 0;
+
   return {
     course: serializeCourse(course, { sectionsCount: sections.length, lecturesCount, totalDurationSeconds }),
     sections: serializedSections,
     progressPercent,
+    enrollment: {
+      id: activeEnrollment.id,
+      status: activeEnrollment.status,
+      startsAt: activeEnrollment.startsAt,
+      expiresAt: activeEnrollment.expiresAt,
+      remainingDays: remainingDaysFrom(activeEnrollment.expiresAt),
+    },
+    totalWatchedSeconds,
+    qbankQuestionsCount,
   };
 }
 

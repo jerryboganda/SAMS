@@ -27,10 +27,10 @@ export const MockExamsManagementPage: React.FC = () => {
   const [exams, setExams] = useState<MockExam[]>([]);
   const [allQuestions, setAllQuestions] = useState<Question[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  // `GET /admin/questions` is the Phase 11.3 admin Question Bank endpoint — not yet built as of this
-  // task (docs/07_EXECUTION_PLAN.md 11.3 is unchecked; confirmed 404 against the real server, no route
-  // registered under routes/v1/admin/*). Tracked separately from the mock-exam list load so a missing
-  // question browser never takes down mock exam CRUD/publish/delete, which have nothing to do with it.
+  // `GET /admin/questions` is the Phase 11.3 admin Question Bank endpoint — it has existed and been
+  // registered since Phase 11.3 (server/src/routes/v1/admin/questions.js). Tracked separately from the
+  // mock-exam list load so a failed question browser fetch never takes down mock exam CRUD/publish/
+  // delete, which have nothing to do with it.
   const [questionsLoadErrorMsg, setQuestionsLoadErrorMsg] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<"success" | "danger" | "warning" | "info">("success");

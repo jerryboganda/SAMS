@@ -157,11 +157,7 @@ export const MyCoursesPage: React.FC = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {activeEnrollments.map((e) => (
-                <CourseCard
-                  key={e.id}
-                  enrollment={e}
-                  courseSlug={e.courseId === 1 ? "nre-step-1-complete" : e.courseId === 2 ? "smle-crash-course" : "mbbs-clinical-foundations"}
-                />
+                <CourseCard key={e.id} enrollment={e} />
               ))}
             </div>
           )}
@@ -184,11 +180,7 @@ export const MyCoursesPage: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {expiredEnrollments.map((e) => (
-              <CourseCard
-                key={e.id}
-                enrollment={e}
-                courseSlug={e.courseId === 1 ? "nre-step-1-complete" : e.courseId === 2 ? "smle-crash-course" : "mbbs-clinical-foundations"}
-              />
+              <CourseCard key={e.id} enrollment={e} />
             ))}
           </div>
         )}

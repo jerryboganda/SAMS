@@ -9,6 +9,7 @@
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
 import { ADMIN_SETTINGS_SECTIONS, ADMIN_SETTINGS_RAW_KEYS } from '../config/constants.js';
+import { sendMail as sendMailDefault } from '../utils/mailer.js';
 
 const { Setting } = db;
 
@@ -274,4 +275,71 @@ export async function updateMany(payload) {
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// POST /admin/settings/smtp/test (Phase 13.3 — see DECISIONS.md's
+// pre-Phase-13.3 entry: this was flagged as a real gap, deliberately not
+// built during Phase 4.4, "SMTP hardening" territory. This closes it.)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends a real test email through the app's already-configured mail
+ * transport (server/src/utils/mailer.js — driven by the `SMTP_*` env vars
+ * per docs/09_DEPLOYMENT_HOSTINGER.md, falling back to nodemailer's
+ * jsonTransport "log instead of send" behavior when unconfigured, exactly
+ * like every other transactional email this app sends). Deliberately does
+ * NOT read SMTP credentials from the request body (that would let anyone
+ * with admin access relay test mail through an arbitrary attacker-supplied
+ * SMTP host — a real security hole) and does NOT rebuild a transport from
+ * the `settings` table's `smtp` section either: that DB row is this app's
+ * Settings-UI DISPLAY/edit copy of the intended SMTP config (masked on read,
+ * merge-on-write — see updateSection above), but it is NOT itself wired to
+ * reconfigure the live mailer transport at runtime (the live transport is
+ * built once, from `env.SMTP_*`, at process start — see mailer.js's own
+ * header comment). Treating the DB row as authoritative here would let this
+ * endpoint report a misleading "using host X" when the real delivery path
+ * may be using a completely different (or no) SMTP host — flagged as a
+ * known architecture gap for a future pass, not papered over here. Always
+ * sends to the CALLING admin's own account email (loaded fresh from
+ * `users` by id — `req.user` only carries `{id, role}`, never a
+ * request-body-supplied address) — this is a self-service "does outbound
+ * mail actually work" check, not a general-purpose mail-relay endpoint.
+ *
+ * `sendMailFn` is test-only dependency injection (defaults to the real
+ * mailer's `sendMail`) so a supertest spec can simulate a genuine SMTP
+ * failure without needing a real unreachable mail server; production call
+ * sites never pass it. mailer.js's own `sendMail` never throws (it catches
+ * internally and resolves `null` on failure, logging server-side) — this
+ * function treats BOTH a caught-and-swallowed `null`/falsy return AND a
+ * directly-thrown error from an injected test double as the same "failed to
+ * send" outcome, so either failure-simulation style works correctly.
+ */
+export async function sendSmtpTest(user, { sendMailFn = sendMailDefault } = {}) {
+  let info;
+  try {
+    info = await sendMailFn({
+      to: user.email,
+      subject: 'SAMS Academy — SMTP test email',
+      text:
+        `This is a test email confirming your SAMS Academy SMTP configuration is working.\n\n` +
+        `Sent to ${user.email} at ${new Date().toISOString()}.`,
+    });
+  } catch {
+    info = null;
+  }
+  if (!info) {
+    // 422 (not 5xx): errorHandler.js replaces 5xx messages with a generic
+    // "Something went wrong" string in production, which would bury this
+    // deliberately-crafted, non-leaky-but-still-useful message exactly when
+    // an admin needs to see it. Mirrors this codebase's existing
+    // GATEWAY_NOT_CONFIGURED precedent (adapters/payments/index.js) for
+    // "an external/configured integration isn't working right now".
+    throw new ApiError(
+      422,
+      'SMTP_TEST_FAILED',
+      'Could not send the test email. Check your SMTP host, port, and credentials, then try again.'
+    );
+  }
+  return { success: true, message: `Test email sent to ${user.email}.` };
 }

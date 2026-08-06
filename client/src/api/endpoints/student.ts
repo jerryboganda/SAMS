@@ -12,10 +12,31 @@ import { MOCK_ACTIVITIES, MOCK_ANNOUNCEMENTS, MOCK_COURSES, MOCK_ENROLLMENTS, MO
  * the real, reload-durable source CoursePlayerPage.tsx now resolves the
  * curriculum + ✓/🔖 state from — see DECISIONS.md's Phase 6.2-6.3 entry.
  */
+/**
+ * Real per-enrollment/watch-time/QBank stats (Phase 13.3 —
+ * server/src/services/studentCourseService.js#getCourseCurriculum) used by
+ * CourseHomePage.tsx to replace hardcoded "140 Days Validity Remaining" /
+ * "18.5 / 20.0 Hours" / "60+ Vignettes" copy with real numbers. `enrollment`
+ * is always present for a real `GET /student/courses/:courseId` response
+ * (the route 404s/403s before this point if the caller isn't enrolled);
+ * `qbankQuestionsCount` is always `0` when the course has no linked QBank
+ * content (`course.includesQBank` false).
+ */
+export interface CourseCurriculumEnrollment {
+  id: number;
+  status: "active" | "expired" | "revoked";
+  startsAt: string;
+  expiresAt: string;
+  remainingDays: number;
+}
+
 export interface CourseCurriculumResponse {
   course: Course;
   sections: CourseSection[];
   progressPercent: number;
+  enrollment?: CourseCurriculumEnrollment;
+  totalWatchedSeconds?: number;
+  qbankQuestionsCount?: number;
 }
 
 export const studentApi = {

@@ -6,6 +6,9 @@ import { validateBody } from '../utils/validate.js';
 import { ApiError } from '../utils/apiError.js';
 import * as adminSettingsService from '../services/adminSettingsService.js';
 import { ADMIN_SETTINGS_SECTIONS, ADMIN_SETTINGS_RAW_KEYS } from '../config/constants.js';
+import db from '../models/index.js';
+
+const { User } = db;
 
 // --- Per-section schemas -------------------------------------------------
 // Every field optional (partial-update friendly) — a masked/unedited secret
@@ -89,6 +92,14 @@ const bulkSettingsBodySchema = z
   .record(z.string(), z.any())
   .refine((obj) => Object.keys(obj).length > 0, { message: 'At least one settings key is required.' });
 
+// `email` is accepted-but-ignored (client/src/api/endpoints/admin.ts's
+// sendTestEmail(email) call shape sends it) — the actual recipient is always
+// the authenticated admin's own account email, never a body-supplied
+// address (see adminSettingsService.js#sendSmtpTest's doc comment). Loosely
+// typed (no `.email()` refinement) on purpose: an ignored field must never
+// itself cause a spurious 422.
+const smtpTestBodySchema = z.object({ email: z.string().trim().max(190).optional() });
+
 // --- Helpers ---------------------------------------------------------------
 
 function ok(res, data, status = 200) {
@@ -124,5 +135,20 @@ export const updateSettingsBulk = asyncHandler(async (req, res) => {
   }
 
   const data = await adminSettingsService.updateMany(normalized);
+  ok(res, data);
+});
+
+/**
+ * POST /admin/settings/smtp/test — `req.user` only carries `{id, role}`
+ * (see middleware/auth.js), never `email`, so the full row is loaded fresh
+ * by id rather than trusting anything from the request.
+ */
+export const sendSmtpTest = asyncHandler(async (req, res) => {
+  validateBody(smtpTestBodySchema, req.body ?? {});
+  const user = await User.findByPk(req.user.id);
+  if (!user) {
+    throw new ApiError(404, 'NOT_FOUND', 'User not found.');
+  }
+  const data = await adminSettingsService.sendSmtpTest(user);
   ok(res, data);
 });

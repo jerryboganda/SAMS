@@ -79,7 +79,14 @@ const PageTitleHandler: React.FC = () => {
     let title = "SAMS Academy | Medical Exam Preparation";
 
     if (path === "/") title = "SAMS Academy | Medical Licensing Exam Prep";
-    else if (path.startsWith("/courses")) title = "Courses & Subscriptions | SAMS Academy";
+    else if (path.startsWith("/courses/")) {
+      // Course detail pages (`/courses/:id` or `/courses/:slug`) receive a server-injected
+      // per-course <title>/og:title on the initial HTML response (Phase 3.5 SSR pre-render —
+      // see server/src/services/seoService.js). Don't stomp it with the generic catalog title
+      // once React hydrates; leave document.title exactly as the server set it.
+      return;
+    }
+    else if (path === "/courses") title = "Courses & Subscriptions | SAMS Academy";
     else if (path.startsWith("/qbank")) title = "Question Bank Hub | SAMS Academy";
     else if (path.startsWith("/faculty")) title = "Faculty & Instructors | SAMS Academy";
     else if (path.startsWith("/about")) title = "About SAMS Academy | Medical Education";

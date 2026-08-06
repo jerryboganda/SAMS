@@ -78,6 +78,27 @@ describe('POST /api/v1/admin/uploads/image', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
+  // docs/08_TESTING_QA.md's "6 MB rejected" half of the uploads row —
+  // ADMIN_UPLOAD_MAX_BYTES (config/constants.js) is 5 MB; multer enforces it
+  // during the upload stream itself (middleware/upload.js's `limits.fileSize`)
+  // BEFORE the magic-byte/content validation this file's other tests cover,
+  // so a real 6 MB buffer must be rejected via multer's own LIMIT_FILE_SIZE
+  // error -> the standard 422 VALIDATION_ERROR envelope, regardless of the
+  // buffer's actual (fake, here) content.
+  test('edge (size cap): a 6 MB file (over the real 5 MB ADMIN_UPLOAD_MAX_BYTES cap) is rejected → 422', async () => {
+    const { agent } = await createAdminSession(app);
+    const oversized = Buffer.alloc(6 * 1024 * 1024, 0);
+
+    const res = await agent
+      .post('/api/v1/admin/uploads/image')
+      .attach('file', oversized, { filename: 'huge.png', contentType: 'image/png' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.message).toMatch(/5 ?MB/i);
+  });
+
   test('validation failure: no file attached → 422', async () => {
     const { agent } = await createAdminSession(app);
     const res = await agent.post('/api/v1/admin/uploads/image');

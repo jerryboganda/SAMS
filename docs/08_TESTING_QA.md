@@ -3,13 +3,13 @@
 ## 1. Stack & layout
 - **Server:** Jest + Supertest against a dedicated test MySQL DB (`DB_NAME_test`), migrated fresh per run; factories/fixtures in `server/tests/factories`. External services always the `mock` adapters in tests.
 - **Client:** Vitest + Testing Library for logic-bearing components (forms, TestRunner reducer, watermark scheduler, auth interceptor); build+lint as static gates.
-- **E2E:** Phase-13 scripted happy path (supertest-chained; Playwright optional if available in the environment).
+- **E2E:** Phase-13 scripted happy path (supertest-chained; Playwright optional if available in the environment) — implemented at `server/tests/e2e/happyPath.e2e.test.js`; runs on its own via `npm run test:e2e --prefix server` (also included automatically in the full `npm run test --prefix server` suite, same `*.test.js` glob every other test file matches).
 - Gate: `npm run verify` = lint + all tests + build. Runs at every phase end; must be green to proceed.
 
 ## 2. Mandatory test matrix (each ✓ = at least one automated test)
 
 **Auth & devices**
-- [ ] Register→verify→login happy path; duplicate email 409; weak password 422
+- [ ] Register→verify→login happy path; duplicate email responds identically to a fresh registration (201, no enumeration — no second user row created; server/tests/auth/register.test.js:58-77); weak password 422
 - [ ] Wrong password ×6 → ACCOUNT_LOCKED; unlock after window
 - [ ] Refresh rotation works; refresh-token reuse → whole family revoked
 - [ ] Device #1, #2 OK; device #3 → 423; after admin reset-devices, new device OK and old refresh tokens dead
@@ -50,14 +50,14 @@
 - [ ] Amount tampering: client-sent price ignored (server recomputes)
 - [ ] Bank transfer: proof upload (rejects non-image/oversize) → approve activates; reject notifies with reason
 - [ ] Raast: order returns manualDetails (Raast ID/IBAN/QR from settings) → proof/ref upload → shared queue approve → enrollment active (mirror of bank-transfer e2e)
-- [ ] Placeholder gateways: payfast/safepay absent from checkout list when disabled; forced order attempt → 422 GATEWAY_NOT_CONFIGURED; interface conformance test passes
+- [ ] Placeholder gateways: `GET /checkout/gateways` always lists every gateway code with a real `enabled:boolean` flag — payfast/safepay report `enabled:false` when unconfigured rather than being omitted from the list (server/tests/checkout/gateways.test.js:29,53); forced order attempt → 422 GATEWAY_NOT_CONFIGURED; interface conformance test passes
 - [ ] ALREADY_ENROLLED 409; coupon max_uses race (two parallel checkouts, one wins)
 - [ ] Invoice/order IDOR: other user's order/invoice → 403/404
 
 **Admin & misc**
 - [ ] Every admin mutation writes audit_logs (spot-check 5 endpoints incl. reset-devices)
 - [ ] CSV import dry-run flags exactly the 3 bad fixture rows; commit imports rest; template columns stable
-- [ ] Question edit after attempts: old test review unchanged (snapshot)
+- [ ] Question edit after attempts: `test_attempt_questions` stores only FKs (no content snapshot, deliberate Phase 11.3 design — see adminQuestionService.js's header comment); a past attempt's review LIVE-JOINS to the current question row, so editing a question's stem correctly shows the CORRECTED text on old reviews too (server/tests/admin/questions.test.js:250-284)
 - [ ] Announcement course-audience reaches only enrolled fixture users
 - [ ] Stored-XSS fixture in stem/announcement sanitized end-to-end
 - [ ] Rate limits: 11th login attempt in window → 429; contact 6th/h → 429

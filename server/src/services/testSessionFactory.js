@@ -6,22 +6,20 @@
 // if you can factor it out cleanly ... rather than writing a parallel,
 // possibly-inconsistent implementation."
 //
-// Why this lives in its OWN module instead of being factored directly out of
-// services/qbankService.js (where the original inline version of this exact
-// transaction lives, inside createTest): this Phase 8.3 task's brief
-// explicitly locks server/src/services/qbankService.js as another
-// in-flight task's (Phase 8.1 analytics) territory for the duration of this
-// task — read-only, no edits. This function is written to be byte-for-byte
-// the same transaction shape qbankService.js#createTest already runs inline
-// (TestSession.create + TestAttemptQuestion.bulkCreate, identical field set
-// and defaults — compare the two side by side), specifically so that once
-// the file lock lifts, a follow-up pass can replace THAT inline block with a
-// call to this shared function with zero behavior change. Until then,
-// services/mockExamService.js (this phase's ONLY caller) uses this directly
-// for the "fixed paper" question-source case, while qbankService.js's own
-// createTest keeps its historical inline copy for the "random pool-resolved"
-// case — same shape, two call sites, not two diverging implementations. See
-// DECISIONS.md's dated Phase 8.3 entry.
+// History: this originally lived in its OWN module (rather than being
+// factored directly out of services/qbankService.js, where the original
+// inline version of this exact transaction lived, inside createTest)
+// because Phase 8.3's task brief explicitly locked qbankService.js as
+// another in-flight task's (Phase 8.1 analytics) read-only territory for
+// that task's duration — services/mockExamService.js (Phase 8.3's caller)
+// used this factory directly for the "fixed paper" question-source case,
+// while qbankService.js's own createTest kept a byte-for-byte-identical
+// inline copy for the "random pool-resolved" case, pending a follow-up once
+// the lock lifted. That follow-up landed in the Phase 13.3 dedup pass:
+// qbankService.js#createTest now calls this factory directly too (see its
+// own doc comment at the call site) — this module is the SOLE place either
+// call site's test_sessions/test_attempt_questions row-creation transaction
+// is implemented.
 import db from '../models/index.js';
 
 const { TestSession, TestAttemptQuestion, sequelize } = db;

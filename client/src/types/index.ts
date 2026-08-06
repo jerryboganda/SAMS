@@ -269,6 +269,9 @@ export interface Enrollment {
   courseId: number;
   courseTitle?: string;
   courseThumbnail?: string;
+  /** Real `courses.slug` for this enrollment's course (server/src/services/studentCourseService.js#serializeEnrollment)
+   * — used to build a real `/checkout/:slug` renewal link; never a hardcoded per-course guess. */
+  courseSlug?: string;
   orderId?: number;
   source: "purchase" | "manual";
   startsAt: string;

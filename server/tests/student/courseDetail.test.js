@@ -8,7 +8,14 @@ import { afterAll, describe, expect, test } from '@jest/globals';
 import request from 'supertest';
 import app from '../../src/app.js';
 import db from '../../src/models/index.js';
-import { createCourse, createSection, createLecture } from '../helpers/publicFixtures.js';
+import {
+  createCourse,
+  createSection,
+  createLecture,
+  createSubject,
+  createBodySystem,
+  createQuestionWithOptions,
+} from '../helpers/publicFixtures.js';
 import {
   createActiveEnrollment,
   createExpiredEnrollment,
@@ -42,7 +49,11 @@ describe('GET /api/v1/student/courses/:courseId', () => {
     const { user } = await createVerifiedUser({ email });
     const { agent } = await loginNewDeviceAndReverify(app, { email, password: DEFAULT_TEST_PASSWORD, userAgent: 'jest-coursedetail-happy' });
     const { course, lec1, lec2, lec3 } = await courseWithCurriculum();
-    await createActiveEnrollment(user, course);
+    const now = new Date();
+    const expectedRemainingDays = 47;
+    await createActiveEnrollment(user, course, {
+      expiresAt: new Date(now.getTime() + expectedRemainingDays * 24 * 60 * 60 * 1000),
+    });
 
     await createLectureProgress(user, lec1, { isCompleted: true, completedAt: new Date(), watchedSeconds: 500, lastPositionSeconds: 500 });
     await createLectureProgress(user, lec2, { isCompleted: false, watchedSeconds: 120, lastPositionSeconds: 120 });
@@ -86,6 +97,83 @@ describe('GET /api/v1/student/courses/:courseId', () => {
 
     // Top-level progressPercent: 1 of 3 published lectures completed.
     expect(data.progressPercent).toBe(33);
+
+    // Phase 13.3: real per-course validity days remaining — sourced from
+    // THIS SPECIFIC enrollment's `expiresAt` (47 days out, set above), not a
+    // hardcoded "140 Days Validity Remaining" badge
+    // (client/src/pages/student/CourseHomePage.tsx previously fabricated
+    // this). Proves it's a real computation, not a coincidental constant.
+    expect(data.enrollment).toBeTruthy();
+    expect(data.enrollment.remainingDays).toBe(expectedRemainingDays);
+    expect(data.enrollment.status).toBe('active');
+
+    // Phase 13.3: real total watched time for this course = sum of every
+    // lecture's watchedSeconds for this user (500 + 120 + 0 = 620), not a
+    // hardcoded "18.5 / 20.0 Hours" stat.
+    expect(data.totalWatchedSeconds).toBe(620);
+  });
+
+  test('Phase 13.3 edge: enrollment.remainingDays reflects the EXACT enrollment expiresAt, not a fixed/rounded constant (a second, differently-dated enrollment proves it is not coincidental)', async () => {
+    const email = uniqueEmail('coursedetail-validity');
+    const { user } = await createVerifiedUser({ email });
+    const { agent } = await loginNewDeviceAndReverify(app, { email, password: DEFAULT_TEST_PASSWORD, userAgent: 'jest-coursedetail-validity' });
+    const { course } = await courseWithCurriculum();
+    const now = new Date();
+    await createActiveEnrollment(user, course, { expiresAt: new Date(now.getTime() + 9 * 24 * 60 * 60 * 1000) });
+
+    const res = await agent.get(`/api/v1/student/courses/${course.id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.enrollment.remainingDays).toBe(9);
+  });
+
+  test('Phase 13.3: qbankQuestionsCount is a real count of active questions sharing the course\'s examCategory (not a hardcoded "60+ Vignettes"), and is 0 for a course with includesQbank=false', async () => {
+    const email = uniqueEmail('coursedetail-qbankcount');
+    const { user } = await createVerifiedUser({ email });
+    const { agent } = await loginNewDeviceAndReverify(app, { email, password: DEFAULT_TEST_PASSWORD, userAgent: 'jest-coursedetail-qbankcount' });
+
+    const subject = await createSubject();
+    const system = await createBodySystem();
+    const { course } = await courseWithCurriculum({ examCategory: 'NRE1', includesQbank: true });
+    await createActiveEnrollment(user, course);
+
+    // Baseline BEFORE adding fixtures — the `questions` table is shared
+    // across this whole test run (server/tests/globalSetup.cjs migrates
+    // once, never wipes between files; many other suites also create
+    // active NRE1 questions), so this proves a real, LIVE count (delta of
+    // exactly +3 from whatever already existed) rather than assuming
+    // exclusive ownership of the table.
+    const baseline = await db.Question.count({ where: { examCategory: 'NRE1', isActive: true } });
+
+    // 3 active NRE1 questions (must count), 1 inactive NRE1 question (must
+    // NOT count), 1 active question in a DIFFERENT exam category (must NOT
+    // count either — no direct course<->question FK, examCategory is the
+    // real scoping proxy).
+    await createQuestionWithOptions({ subject, system, overrides: { examCategory: 'NRE1' } });
+    await createQuestionWithOptions({ subject, system, overrides: { examCategory: 'NRE1' } });
+    await createQuestionWithOptions({ subject, system, overrides: { examCategory: 'NRE1' } });
+    await createQuestionWithOptions({ subject, system, overrides: { examCategory: 'NRE1', isActive: false } });
+    await createQuestionWithOptions({ subject, system, overrides: { examCategory: 'SMLE' } });
+
+    const res = await agent.get(`/api/v1/student/courses/${course.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.qbankQuestionsCount).toBe(baseline + 3);
+
+    // A second, video-only course (includesQbank=false) in the SAME exam
+    // category must report 0 — never a plausible-looking nonzero guess.
+    const email2 = uniqueEmail('coursedetail-qbankcount-novideo');
+    const { user: user2 } = await createVerifiedUser({ email: email2 });
+    const { agent: agent2 } = await loginNewDeviceAndReverify(app, {
+      email: email2,
+      password: DEFAULT_TEST_PASSWORD,
+      userAgent: 'jest-coursedetail-qbankcount-novideo',
+    });
+    const { course: videoOnlyCourse } = await courseWithCurriculum({ examCategory: 'NRE1', includesQbank: false });
+    await createActiveEnrollment(user2, videoOnlyCourse);
+
+    const res2 = await agent2.get(`/api/v1/student/courses/${videoOnlyCourse.id}`);
+    expect(res2.status).toBe(200);
+    expect(res2.body.data.qbankQuestionsCount).toBe(0);
   });
 
   test('not enrolled at all -> 403 NOT_ENROLLED', async () => {

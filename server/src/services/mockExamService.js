@@ -17,64 +17,35 @@
 // once a mock-mode session exists it is indistinguishable from any other
 // test_sessions row to routes/v1/qbank.js's existing runner endpoints.
 //
-// IMPORTANT — server/src/services/qbankService.js is another in-flight
-// task's (Phase 8.1 analytics) territory for this task's duration: read-only,
-// no edits, no imports of its unexported internals. Two consequences visible
-// below, both documented at their exact point:
-//   1. getAccessibleExamCategories() is a deliberate byte-for-byte mirror of
-//      qbankService.js's own private helper of the same name (same query
-//      shape, same "active, non-expired, includesQbank" definition) rather
-//      than a shared import — qbankService.js doesn't export it, and this
-//      task may not edit qbankService.js to add that export. See
-//      DECISIONS.md's dated Phase 8.3 entry for why re-deriving this ONE
-//      definition (not reinventing a different one) was judged acceptable
-//      given the lock, and what should happen once it lifts.
-//   2. The question-set creation itself uses services/testSessionFactory.js
-//      (a genuinely shared module, not a qbankService.js edit) — see that
-//      file's header comment.
+// getAccessibleExamCategories()/computeRemainingSeconds(): imported from
+// qbankService.js (Phase 13.3 dedup pass) rather than maintained as
+// byte-for-byte local copies — this file used to re-derive both because
+// qbankService.js was another in-flight task's read-only-locked territory
+// at the time this file was first written (see DECISIONS.md's dated Phase
+// 8.3 entry, which explicitly flagged this as a follow-up once the lock
+// lifted). The question-set creation itself already used the genuinely
+// shared services/testSessionFactory.js from day one — see that file's
+// header comment.
 import { Op, col, fn } from 'sequelize';
 import { ApiError } from '../utils/apiError.js';
 import db from '../models/index.js';
 import { createSessionWithAttemptQuestions } from './testSessionFactory.js';
+import { getAccessibleExamCategories, computeRemainingSeconds } from './qbankService.js';
 
-const { MockExam, MockExamQuestion, TestSession, Enrollment, Course } = db;
+const { MockExam, MockExamQuestion, TestSession } = db;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 /**
- * See this file's header comment (point 1) — intentionally the same query
- * shape as qbankService.js's private getAccessibleExamCategories: distinct
- * `courses.exam_category` for every course the user holds a currently-active,
- * non-expired enrollment in AND `courses.includes_qbank = true`. This is the
- * ONE definition of "my accessible QBank categories" this codebase uses —
- * mock exams gate on it exactly like qbank test creation does, never a
- * separately-invented notion of "enrolled".
- */
-async function getAccessibleExamCategories(userId) {
-  const now = new Date();
-  const enrollments = await Enrollment.findAll({
-    where: { userId, status: 'active', expiresAt: { [Op.gt]: now } },
-    include: [{ model: Course, as: 'course', attributes: ['examCategory'], where: { includesQbank: true }, required: true }],
-  });
-  return [...new Set(enrollments.map((e) => e.course.examCategory))];
-}
-
-/** Server-authoritative remaining time — same shape as qbankService.js's private computeRemainingSeconds (re-derived here for the same file-lock reason; trivial enough that duplicating it is a non-issue). */
-function computeRemainingSeconds(session) {
-  if (!session.timeLimitSeconds) return null;
-  if (session.status !== 'in_progress') return 0;
-  const deadlineMs = new Date(session.startedAt).getTime() + session.timeLimitSeconds * 1000;
-  return Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
-}
-
-/**
  * Session-only serializer (no nested `.questions`) — deliberately mirrors
  * the SHAPE of qbankService.js's private serializeTestSessionSummary (same
  * field set GET /qbank/tests's history listing returns), but is its own
  * small function here rather than a shared import (qbankService.js doesn't
- * export it, and can't be edited this round — see file header). The
+ * export it — it's a display serializer entangled with that file's
+ * answer-secrecy rules, not a standalone, independently-reusable helper the
+ * way getAccessibleExamCategories/computeRemainingSeconds are). The
  * frontend's `TestSession` type marks `.questions` optional specifically
  * because list/create-summary responses don't always carry it; the very
  * next call a real client makes after POST /mock-exams/:id/start is
@@ -82,11 +53,9 @@ function computeRemainingSeconds(session) {
  * docs/04_API_SPEC.md §4's own note), which DOES return the full
  * per-question payload with all of qbankService.js's answer-secrecy rules
  * correctly applied — reimplementing that ~150-line secrecy-sensitive
- * serializer here, in a second file, is exactly the kind of "parallel,
- * possibly-inconsistent" duplication this phase's brief warns against, and
- * unlike the plain create-transaction (factored into testSessionFactory.js),
- * that logic has no independently-safe way to be extracted without touching
- * the locked file. See DECISIONS.md.
+ * serializer here, in a second file, would be exactly the kind of
+ * "parallel, possibly-inconsistent" duplication this codebase avoids. See
+ * DECISIONS.md.
  */
 function serializeMockSessionSummary(session, mockExam) {
   return {

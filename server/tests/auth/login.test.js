@@ -5,6 +5,7 @@ import request from 'supertest';
 import app from '../../src/app.js';
 import db from '../../src/models/index.js';
 import { testOutbox } from '../../src/utils/mailer.js';
+import { LOCKOUT_WINDOW_MINUTES } from '../../src/config/constants.js';
 import { createVerifiedUser, uniqueEmail, DEFAULT_TEST_PASSWORD } from '../helpers/testUsers.js';
 import { loginNewDeviceAndReverify, extractReverifyCode, getCookieValue } from '../helpers/loginFlow.js';
 
@@ -108,6 +109,48 @@ describe('POST /api/v1/auth/login', () => {
     const lockedRes = await request(app).post('/api/v1/auth/login').send({ email, password });
     expect(lockedRes.status).toBe(423);
     expect(lockedRes.body.error.code).toBe('ACCOUNT_LOCKED');
+  });
+
+  // docs/08_TESTING_QA.md's "unlock after window" half of the lockout row —
+  // isLockedOut() (services/authService.js) only counts `status:'failed'`
+  // login_events rows with createdAt within the last LOCKOUT_WINDOW_MINUTES,
+  // so backdating those rows past the window (same idiom as other
+  // time-window tests in this codebase, e.g.
+  // tests/jobs/enrollmentLifecycleCron.test.js's direct `.update({ expiresAt
+  // ... })`) must make the account unlock again — a real 200, not a stale
+  // 423. The final correct-password login is made from an ALREADY-registered
+  // device (established via loginNewDeviceAndReverify before the lockout
+  // attempts, same pattern the file's own "happy path" test above uses) so
+  // the assertion isolates the lockout gate specifically — a genuinely
+  // brand-new device is always suspicious (REVERIFY_REQUIRED) regardless of
+  // lockout state, which would otherwise confound this test's 200 assertion.
+  test('edge: an account locked by 6 failed attempts unlocks again once the lockout window has fully elapsed', async () => {
+    const { email, password } = await createVerifiedUser({ email: uniqueEmail('login-lockout-unlock') });
+    const userAgent = 'LockoutUnlockDevice/1.0';
+    const { agent } = await loginNewDeviceAndReverify(app, { email, password, userAgent });
+
+    for (let i = 0; i < 6; i += 1) {
+      const res = await request(app).post('/api/v1/auth/login').send({ email, password: 'WrongPassword@1' });
+      expect(res.status).toBe(401);
+    }
+
+    const stillLockedRes = await agent.post('/api/v1/auth/login').set('User-Agent', userAgent).send({ email, password });
+    expect(stillLockedRes.status).toBe(423);
+    expect(stillLockedRes.body.error.code).toBe('ACCOUNT_LOCKED');
+
+    // Backdate every failed login_events row for this email to just past the
+    // lockout window — simulating real wall-clock time having elapsed
+    // without an actual sleep.
+    const pastWindow = new Date(Date.now() - (LOCKOUT_WINDOW_MINUTES * 60 * 1000 + 60 * 1000));
+    await db.LoginEvent.update(
+      { createdAt: pastWindow },
+      { where: { emailTried: email, status: 'failed' } }
+    );
+
+    const unlockedRes = await agent.post('/api/v1/auth/login').set('User-Agent', userAgent).send({ email, password });
+    expect(unlockedRes.status).toBe(200);
+    expect(unlockedRes.body.success).toBe(true);
+    expect(unlockedRes.body.data.user.email).toBe(email);
   });
 
   test('edge: 3rd genuinely new device is rejected with 423 DEVICE_LIMIT_REACHED while the first 2 devices keep working', async () => {

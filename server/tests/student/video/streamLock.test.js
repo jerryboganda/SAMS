@@ -11,6 +11,7 @@ import { createCourse, createSection, createLecture } from '../../helpers/public
 import { createActiveEnrollment } from '../../helpers/studentFixtures.js';
 import { createVerifiedUser, uniqueEmail, DEFAULT_TEST_PASSWORD } from '../../helpers/testUsers.js';
 import { loginNewDeviceAndReverify } from '../../helpers/loginFlow.js';
+import { LECTURE_COMPLETE_THRESHOLD_RATIO } from '../../../src/config/constants.js';
 
 const { sequelize } = db;
 
@@ -164,6 +165,114 @@ describe('PUT /api/v1/student/lectures/:id/heartbeat — concurrent stream lock'
     expect(res.body.data.progress.lastPositionSeconds).toBe(100); // clamped to duration
     expect(res.body.data.progress.isCompleted).toBe(true);
     expect(res.body.data.progress.completedAt).toBeTruthy();
+  });
+
+  // docs/08_TESTING_QA.md's "≥90% marks completed" row — the REAL configured
+  // ratio is LECTURE_COMPLETE_THRESHOLD_RATIO=0.95 (config/constants.js), not
+  // 90% (stale matrix wording — the row itself needs no edit since "≥[the
+  // configured threshold]" is still accurate, just imprecise). The existing
+  // "clamp-complete" test above only ever proves an extreme 100%-of-duration
+  // position completes; these two prove the REAL boundary is exercised, not
+  // just an extreme value that would pass under almost any reasonable ratio.
+  test('boundary: a position one second short of the real completion threshold ratio does NOT mark the lecture complete', async () => {
+    const email = uniqueEmail('threshold-below');
+    const { user } = await createVerifiedUser({ email });
+    const course = await createCourse({ isPublished: true });
+    const section = await createSection(course);
+    // duration=100 makes the real threshold position an exact integer
+    // (0.95 * 100 === 95 with no floating-point rounding surprise).
+    const lecture = await createLecture(course, section, { durationSeconds: 100 });
+    await createActiveEnrollment(user, course);
+    const { agent } = await loginNewDeviceAndReverify(app, { email, password: DEFAULT_TEST_PASSWORD, userAgent: 'jest-threshold-below' });
+
+    const play = await agent.get(`/api/v1/student/lectures/${lecture.id}/play`);
+    const sessionKey = play.body.data.sessionKey;
+
+    const belowThresholdPosition = LECTURE_COMPLETE_THRESHOLD_RATIO * lecture.durationSeconds - 1; // 94
+    const res = await agent
+      .put(`/api/v1/student/lectures/${lecture.id}/heartbeat`)
+      .send({ sessionKey, positionSeconds: belowThresholdPosition, deltaSeconds: 10 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.progress.lastPositionSeconds).toBe(belowThresholdPosition);
+    expect(res.body.data.progress.isCompleted).toBe(false);
+    expect(res.body.data.progress.completedAt).toBeFalsy();
+  });
+
+  test('boundary: a position exactly at the real completion threshold ratio DOES mark the lecture complete', async () => {
+    const email = uniqueEmail('threshold-at');
+    const { user } = await createVerifiedUser({ email });
+    const course = await createCourse({ isPublished: true });
+    const section = await createSection(course);
+    const lecture = await createLecture(course, section, { durationSeconds: 100 });
+    await createActiveEnrollment(user, course);
+    const { agent } = await loginNewDeviceAndReverify(app, { email, password: DEFAULT_TEST_PASSWORD, userAgent: 'jest-threshold-at' });
+
+    const play = await agent.get(`/api/v1/student/lectures/${lecture.id}/play`);
+    const sessionKey = play.body.data.sessionKey;
+
+    const atThresholdPosition = LECTURE_COMPLETE_THRESHOLD_RATIO * lecture.durationSeconds; // 95
+    const res = await agent
+      .put(`/api/v1/student/lectures/${lecture.id}/heartbeat`)
+      .send({ sessionKey, positionSeconds: atThresholdPosition, deltaSeconds: 10 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.progress.lastPositionSeconds).toBe(atThresholdPosition);
+    expect(res.body.data.progress.isCompleted).toBe(true);
+    expect(res.body.data.progress.completedAt).toBeTruthy();
+  });
+
+  // docs/08_TESTING_QA.md's "study seconds accumulate" half — every existing
+  // reference to UserDailyStat elsewhere in this suite is a pre-seeded
+  // fixture row, never a genuine live side-effect of a real heartbeat call
+  // (server/src/services/videoService.js's heartbeat() increments
+  // `dailyStat.videoSeconds` by the same server-computed `effectiveDelta` the
+  // response's `progress.watchedSeconds` reflects). `lastHeartbeatAt` is
+  // backdated first (same idiom the "clamp" test above uses) so the
+  // elapsed-wall-clock cross-check doesn't clip the claimed delta down to
+  // near-zero for this immediate play->heartbeat call.
+  test("a real heartbeat call genuinely increases today's UserDailyStat.videoSeconds by the credited delta", async () => {
+    const email = uniqueEmail('dailystat-live');
+    const { user } = await createVerifiedUser({ email });
+    const course = await createCourse({ isPublished: true });
+    const section = await createSection(course);
+    const lecture = await createLecture(course, section, { durationSeconds: 600 });
+    await createActiveEnrollment(user, course);
+    const { agent } = await loginNewDeviceAndReverify(app, { email, password: DEFAULT_TEST_PASSWORD, userAgent: 'jest-dailystat-live' });
+
+    const play = await agent.get(`/api/v1/student/lectures/${lecture.id}/play`);
+    const sessionKey = play.body.data.sessionKey;
+
+    const before = await db.UserDailyStat.findOne({ where: { userId: user.id } });
+    expect(before).toBeNull();
+
+    await db.PlaybackSession.update(
+      { lastHeartbeatAt: new Date(Date.now() - 20 * 1000) },
+      { where: { sessionKey } }
+    );
+
+    const res = await agent
+      .put(`/api/v1/student/lectures/${lecture.id}/heartbeat`)
+      .send({ sessionKey, positionSeconds: 15, deltaSeconds: 15 });
+    expect(res.status).toBe(200);
+    expect(res.body.data.progress.watchedSeconds).toBe(15);
+
+    const after = await db.UserDailyStat.findOne({ where: { userId: user.id } });
+    expect(after).not.toBeNull();
+    expect(after.videoSeconds).toBe(15);
+
+    // A second heartbeat call genuinely ACCUMULATES on top, not overwrites.
+    await db.PlaybackSession.update(
+      { lastHeartbeatAt: new Date(Date.now() - 20 * 1000) },
+      { where: { sessionKey } }
+    );
+    const res2 = await agent
+      .put(`/api/v1/student/lectures/${lecture.id}/heartbeat`)
+      .send({ sessionKey, positionSeconds: 25, deltaSeconds: 10 });
+    expect(res2.status).toBe(200);
+
+    const afterSecond = await db.UserDailyStat.findOne({ where: { userId: user.id } });
+    expect(afterSecond.videoSeconds).toBe(25);
   });
 
   test('validation: heartbeat requires sessionKey/positionSeconds/deltaSeconds -> 422', async () => {

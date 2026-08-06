@@ -256,6 +256,110 @@ describe('POST /api/v1/qbank/tests', () => {
     expect(res.body.error.details.available).toBe(0);
   });
 
+  test("pool='unused' returns ONLY never-seen questions — excludes anything with a times_seen>0 history row (past-correct or past-wrong alike)", async () => {
+    const { agent, user } = await studentWithQbankAccess('create-pool-unused');
+    const subject = await createSubject();
+    const system = await createBodySystem();
+    // 5 genuinely-never-seen questions (>= QBANK_TEST_COUNT_MIN) plus 2 seen
+    // questions that must NEVER be picked: one past-correct, one past-wrong.
+    const unseenQuestions = await createQuestions(subject, system, 5);
+    const [seenCorrectQ, seenWrongQ] = await createQuestions(subject, system, 2);
+
+    await setQuestionHistory(user, seenCorrectQ, { lastResult: 'correct', timesSeen: 1, timesCorrect: 1 });
+    await setQuestionHistory(user, seenWrongQ, { lastResult: 'incorrect', timesSeen: 1 });
+
+    // subjectIds/systemIds-scoped — without this, "unused" would also match
+    // every OTHER NRE1 question created by other tests sharing this same
+    // live MySQL test database (never seen by THIS user either), making the
+    // returned set unpredictable. Same isolation mitigation the
+    // "insufficient questions"/"count=200" tests below already document.
+    const res = await agent.post('/api/v1/qbank/tests').send({
+      examCategory: 'NRE1',
+      subjectIds: [subject.id],
+      systemIds: [system.id],
+      count: 5,
+      mode: 'practice',
+      timed: false,
+      pool: 'unused',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.questions).toHaveLength(5);
+    const unseenIds = new Set(unseenQuestions.map((q) => q.id));
+    const returnedIds = res.body.data.questions.map((q) => q.questionId);
+    returnedIds.forEach((id) => expect(unseenIds.has(id)).toBe(true));
+    expect(returnedIds).not.toContain(seenCorrectQ.id);
+    expect(returnedIds).not.toContain(seenWrongQ.id);
+  });
+
+  test("pool='unused' with every question already seen -> 422 INSUFFICIENT_QUESTIONS (not a silently-smaller test)", async () => {
+    const { agent, user } = await studentWithQbankAccess('create-pool-unused-empty');
+    const subject = await createSubject();
+    const system = await createBodySystem();
+    const [seenQ] = await createQuestions(subject, system, 1);
+    await setQuestionHistory(user, seenQ, { lastResult: 'correct', timesSeen: 1, timesCorrect: 1 });
+
+    const res = await agent.post('/api/v1/qbank/tests').send({
+      examCategory: 'NRE1',
+      subjectIds: [subject.id],
+      systemIds: [system.id],
+      count: 5,
+      mode: 'practice',
+      timed: false,
+      pool: 'unused',
+    });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('INSUFFICIENT_QUESTIONS');
+    expect(res.body.error.details.available).toBe(0);
+  });
+
+  test("pool='bookmarked' returns EXACTLY the user's bookmarked set — never an unbookmarked question", async () => {
+    const { agent, user } = await studentWithQbankAccess('create-pool-bookmarked');
+    const subject = await createSubject();
+    const system = await createBodySystem();
+    const bookmarkedQuestions = await createQuestions(subject, system, 5);
+    const [notBookmarkedQ] = await createQuestions(subject, system, 1);
+
+    await Promise.all(bookmarkedQuestions.map((q) => createQuestionBookmark(user, q)));
+
+    const res = await agent.post('/api/v1/qbank/tests').send({
+      examCategory: 'NRE1',
+      count: 5,
+      mode: 'practice',
+      timed: false,
+      pool: 'bookmarked',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.questions).toHaveLength(5);
+    const bookmarkedIds = new Set(bookmarkedQuestions.map((q) => q.id));
+    const returnedIds = res.body.data.questions.map((q) => q.questionId);
+    returnedIds.forEach((id) => expect(bookmarkedIds.has(id)).toBe(true));
+    expect(returnedIds).not.toContain(notBookmarkedQ.id);
+    // Every bookmarked question was actually returned (exact set, count=5 == bookmarked count=5).
+    expect(new Set(returnedIds)).toEqual(bookmarkedIds);
+  });
+
+  test("pool='bookmarked' with an empty bookmark set -> 422 INSUFFICIENT_QUESTIONS (real endpoint behavior — not a silent empty test)", async () => {
+    const { agent } = await studentWithQbankAccess('create-pool-bookmarked-empty');
+    const subject = await createSubject();
+    const system = await createBodySystem();
+    await createQuestions(subject, system, 5); // exist, but none bookmarked by this user
+
+    const res = await agent.post('/api/v1/qbank/tests').send({
+      examCategory: 'NRE1',
+      count: 5,
+      mode: 'practice',
+      timed: false,
+      pool: 'bookmarked',
+    });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('INSUFFICIENT_QUESTIONS');
+    expect(res.body.error.details.available).toBe(0);
+  });
+
   test('insufficient questions for the requested count -> 422 INSUFFICIENT_QUESTIONS with the real available count', async () => {
     const { agent } = await studentWithQbankAccess('create-insufficient');
     const subject = await createSubject();

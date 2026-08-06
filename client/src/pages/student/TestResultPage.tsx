@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Card, Button, Badge, ProgressBar, Skeleton, EmptyState } from "../../components/ui";
 import { qbankApi } from "../../api/endpoints/qbank";
+import { mockExamsApi } from "../../api/endpoints/mock-exams";
 import { TestSession } from "../../types";
 
 type LoadState = "loading" | "error" | "data";
@@ -30,6 +31,11 @@ export const TestResultPage: React.FC = () => {
   const [historyList, setHistoryList] = useState<TestSession[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadErrorMsg, setLoadErrorMsg] = useState("");
+  // Real pass mark for the specific linked mock exam paper (Fix 1) — the session/result response only
+  // carries mockExamId/mockExamTitle, not the paper's configured passPercent, so it's resolved by looking
+  // the id up against the student's own mock-exam list. `null` means "not a mock-mode session with a
+  // linked exam" OR "couldn't resolve it" — either way, never fall back to a hardcoded guess.
+  const [passPercent, setPassPercent] = useState<number | null>(null);
 
   const loadResult = useCallback(async () => {
     setLoadState("loading");
@@ -38,6 +44,22 @@ export const TestResultPage: React.FC = () => {
       const [data, hist] = await Promise.all([qbankApi.getTestSession(Number(testIdParam)), qbankApi.getTestHistory()]);
       setSession(data);
       setHistoryList(hist);
+
+      if (data.mode === "mock" && data.mockExamId) {
+        try {
+          const exams = await mockExamsApi.getMockExams();
+          const matched = exams.find((e) => e.id === data.mockExamId);
+          setPassPercent(matched ? matched.passPercent : null);
+        } catch (passMarkErr) {
+          // Non-fatal — the result itself still loaded fine; just show a neutral
+          // "official pass mark" label instead of a specific (possibly wrong) number.
+          console.error("Failed to load mock exam pass mark", passMarkErr);
+          setPassPercent(null);
+        }
+      } else {
+        setPassPercent(null);
+      }
+
       setLoadState("data");
     } catch (err: any) {
       console.error("Failed to load test session result", err);
@@ -177,14 +199,22 @@ export const TestResultPage: React.FC = () => {
                 {isPassed ? "National Mock Exam: PASSED!" : "National Mock Exam: DID NOT PASS"}
               </h3>
               <p className="text-xs opacity-90 mt-0.5">
-                {isPassed
-                  ? `Your score of ${score}% meets and exceeds the 60% pass mark threshold.`
-                  : `Your score of ${score}% is below the required 60% passing standard. Review weak subjects below.`}
+                {passPercent != null ? (
+                  isPassed ? (
+                    `Your score of ${score}% meets and exceeds the ${passPercent}% pass mark threshold.`
+                  ) : (
+                    `Your score of ${score}% is below the required ${passPercent}% passing standard. Review weak subjects below.`
+                  )
+                ) : isPassed ? (
+                  `Your score of ${score}% meets this exam's official pass mark.`
+                ) : (
+                  `Your score of ${score}% is below this exam's official pass mark. Review weak subjects below.`
+                )}
               </p>
             </div>
           </div>
           <Badge variant={isPassed ? "emerald" : "danger"} size="md" className="shrink-0 font-extrabold">
-            Standard 60% Pass Mark
+            {passPercent != null ? `${passPercent}% Pass Mark` : "Official Pass Mark"}
           </Badge>
         </div>
       )}
@@ -264,13 +294,21 @@ export const TestResultPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Pass Mark Threshold Callout */}
-        <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-700 text-xs text-slate-300 flex items-center justify-between">
-          <span className="font-medium">Reference Passing Standard Threshold: <strong>60%</strong></span>
-          <Badge variant={score >= 60 ? "emerald" : "danger"} size="sm">
-            {score >= 60 ? `+${(score - 60).toFixed(0)}% Above Standard` : `${(60 - score).toFixed(0)}% Below Threshold`}
-          </Badge>
-        </div>
+        {/* Pass Mark Threshold Callout — only rendered when we have a real, specific pass mark for THIS
+            exam (mode==='mock' with a linked mock exam paper whose passPercent we resolved); practice/exam
+            sessions and unresolved lookups have no pass mark concept, so nothing is fabricated here. */}
+        {session.mode === "mock" && hasOfficialPassFail && passPercent != null && (
+          <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-700 text-xs text-slate-300 flex items-center justify-between">
+            <span className="font-medium">
+              Reference Passing Standard Threshold: <strong>{passPercent}%</strong>
+            </span>
+            <Badge variant={score >= passPercent ? "emerald" : "danger"} size="sm">
+              {score >= passPercent
+                ? `+${(score - passPercent).toFixed(0)}% Above Standard`
+                : `${(passPercent - score).toFixed(0)}% Below Threshold`}
+            </Badge>
+          </div>
+        )}
       </Card>
 
       {/* Primary Action Buttons */}

@@ -58,6 +58,49 @@ describe('POST /api/v1/checkout/orders', () => {
     expect(order.couponCode).toBe(coupon.code);
   });
 
+  // docs/08_TESTING_QA.md's "Amount tampering: client-sent price ignored
+  // (server recomputes)" row. `createOrderSchema` (checkoutController.js)
+  // doesn't even declare an amount/price/finalAmount field, and zod's
+  // `z.object()` strips unknown keys by default (not `.strict()` /
+  // `.passthrough()`), so any injected field is silently dropped by
+  // validateBody before orderService.createOrder ever sees it. This test
+  // asserts the END RESULT the matrix row actually cares about — the
+  // PERSISTED order amount still equals the real server-computed quote for
+  // the same course, never the attacker-supplied value — not merely "the
+  // field was stripped".
+  test('amount tampering: an injected amount/price/finalAmount far below the real price is ignored — persisted order matches the real server-computed quote', async () => {
+    const { agent } = await studentSession('order-tamperedAmount');
+    const course = await createCourse({ price: 15000 });
+
+    const quoteRes = await agent.post('/api/v1/checkout/quote').send({ courseId: course.id });
+    expect(quoteRes.status).toBe(200);
+    expect(quoteRes.body.data.finalAmount).toBe(15000);
+
+    const orderRes = await agent.post('/api/v1/checkout/orders').send({
+      courseId: course.id,
+      gateway: 'mock',
+      // A real attacker's likely guesses at a spoofable field name — none of
+      // these exist in createOrderSchema, so all must be silently dropped.
+      amount: 1,
+      price: 1,
+      finalAmount: 1,
+      discountAmount: 14999,
+    });
+
+    expect(orderRes.status).toBe(201);
+    const order = orderRes.body.data.order;
+    expect(order.amount).toBe(quoteRes.body.data.originalPrice);
+    expect(order.finalAmount).toBe(quoteRes.body.data.finalAmount);
+    expect(order.finalAmount).toBe(15000);
+    expect(order.discountAmount).toBe(quoteRes.body.data.discountAmount);
+
+    // The DB row itself (not just the response echo) reflects the real
+    // server-computed amount — never the injected 1.
+    const persisted = await db.Order.findByPk(order.id);
+    expect(Number(persisted.finalAmount)).toBe(15000);
+    expect(Number(persisted.amount)).toBe(15000);
+  });
+
   test('409 ALREADY_ENROLLED when the user has a CURRENT active enrollment for the course', async () => {
     const { agent, user } = await studentSession('order-alreadyEnrolled');
     const course = await createCourse({ price: 15000 });

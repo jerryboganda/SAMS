@@ -15,6 +15,7 @@
 import { Op, col, fn } from 'sequelize';
 import { ApiError } from '../utils/apiError.js';
 import db from '../models/index.js';
+import { createSessionWithAttemptQuestions } from './testSessionFactory.js';
 
 const {
   Question,
@@ -49,8 +50,14 @@ function todayUtcDateOnly() {
  * NOT "ever enrolled" (an expired/revoked enrollment grants none either,
  * mirroring services/videoService.js#assertEnrolled's active-and-unexpired
  * gate). One query (JOIN, not N+1 per enrollment).
+ *
+ * Exported (Phase 13.3 dedup pass) so services/mockExamService.js can import
+ * this ONE definition instead of maintaining its own byte-for-byte copy —
+ * see that file's header comment for the history (it was originally
+ * re-derived there because this file was another in-flight task's
+ * read-only-locked territory at the time; that lock has long since lifted).
  */
-async function getAccessibleExamCategories(userId) {
+export async function getAccessibleExamCategories(userId) {
   const now = new Date();
   const enrollments = await Enrollment.findAll({
     where: { userId, status: 'active', expiresAt: { [Op.gt]: now } },
@@ -279,8 +286,14 @@ async function autoFinalizeIfExpired(session) {
   return finalizeCompleted(session, attemptQuestions);
 }
 
-/** Server-authoritative remaining time — never trusts a client-supplied value. null for untimed sessions; 0 once the session is no longer in_progress. */
-function computeRemainingSeconds(session) {
+/**
+ * Server-authoritative remaining time — never trusts a client-supplied
+ * value. null for untimed sessions; 0 once the session is no longer
+ * in_progress. Exported (Phase 13.3 dedup pass) for services/mockExamService.js
+ * to reuse instead of maintaining its own copy — see this file's
+ * getAccessibleExamCategories doc comment above for the same history.
+ */
+export function computeRemainingSeconds(session) {
   if (!session.timeLimitSeconds) return null;
   if (session.status !== 'in_progress') return 0;
   const deadlineMs = new Date(session.startedAt).getTime() + session.timeLimitSeconds * 1000;
@@ -683,28 +696,27 @@ export async function createTest(userId, payload) {
     );
   }
 
-  const session = await sequelize.transaction(async (transaction) => {
-    const created = await TestSession.create(
-      {
-        userId,
-        mode,
-        mockExamId: null,
-        examCategory,
-        filters: { subjectIds: subjectIds ?? null, systemIds: systemIds ?? null, pool },
-        questionCount: count,
-        timeLimitSeconds: timed ? timeLimitSeconds : null,
-        status: 'in_progress',
-        startedAt: new Date(),
-      },
-      { transaction }
-    );
-
-    await TestAttemptQuestion.bulkCreate(
-      questionIds.map((questionId, idx) => ({ testSessionId: created.id, questionId, sortOrder: idx + 1 })),
-      { transaction }
-    );
-
-    return created;
+  // Row-creation transaction itself: delegated to the shared
+  // testSessionFactory.js (Phase 13.3 dedup pass) — this used to be an
+  // inline TestSession.create + TestAttemptQuestion.bulkCreate transaction
+  // duplicating that factory's exact shape byte-for-byte (see
+  // testSessionFactory.js's header comment for why the duplication existed
+  // in the first place: this file was another in-flight task's read-only-
+  // locked territory when the factory was extracted for
+  // mockExamService.js#startMockExam's use). Pure refactor — identical
+  // fields, identical `sortOrder = idx + 1` convention, identical
+  // `questionCount` (== `questionIds.length`, which is always exactly
+  // `count` here since resolvePoolQuestionIds's `LIMIT count` guarantees
+  // `questionIds.length <= count`, and the INSUFFICIENT_QUESTIONS check
+  // above already rejected anything less).
+  const session = await createSessionWithAttemptQuestions({
+    userId,
+    mode,
+    mockExamId: null,
+    examCategory,
+    filters: { subjectIds: subjectIds ?? null, systemIds: systemIds ?? null, pool },
+    questionIds,
+    timeLimitSeconds: timed ? timeLimitSeconds : null,
   });
 
   return buildSessionResponse(userId, session.id, session);
@@ -1072,6 +1084,8 @@ export async function listIncorrectQuestions(userId) {
 }
 
 export default {
+  getAccessibleExamCategories,
+  computeRemainingSeconds,
   getQbankMeta,
   createTest,
   getTestSession,

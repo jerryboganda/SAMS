@@ -49,10 +49,17 @@ describe('GET /api/v1/student/courses', () => {
     expect(active.courseTitle).toBe('Active Course');
     expect(active.progressPercent).toBe(50); // 1 of 2 published lectures completed
     expect(active.remainingDays).toBeGreaterThan(14);
+    // Real `courses.slug` (Phase 13.3) — each enrollment's OWN course slug,
+    // not a hardcoded guess (client/src/components/student/CourseCard.tsx
+    // previously defaulted every course to "nre-step-1-complete").
+    expect(active.courseSlug).toBe(activeCourse.slug);
 
     expect(expired.status).toBe('active'); // still "active" in DB, just past expiresAt — see studentFixtures.js
     expect(expired.remainingDays).toBe(0);
     expect(expired.progressPercent).toBe(0);
+    expect(expired.courseSlug).toBe(expiredCourse.slug);
+    // Proves this is genuinely per-course, not a single reused value.
+    expect(active.courseSlug).not.toBe(expired.courseSlug);
   });
 
   test('no enrollments -> empty array, not an error', async () => {

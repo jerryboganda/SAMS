@@ -241,11 +241,7 @@ export const StudentDashboardPage: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {activeEnrollments.map((enrollment) => (
-              <CourseCard
-                key={enrollment.id}
-                enrollment={enrollment}
-                courseSlug={enrollment.courseId === 1 ? "nre-step-1-complete" : enrollment.courseId === 2 ? "smle-crash-course" : "mbbs-clinical-foundations"}
-              />
+              <CourseCard key={enrollment.id} enrollment={enrollment} />
             ))}
           </div>
         )}

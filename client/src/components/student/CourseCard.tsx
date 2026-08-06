@@ -19,6 +19,13 @@ interface CourseCardProps {
    */
   totalLectures?: number;
   completedLectures?: number;
+  /**
+   * Explicit override, when a caller already has a courseSlug from somewhere
+   * other than `enrollment.courseSlug` (e.g. a fresher lookup). Most callers
+   * should omit this and let it fall through to the real
+   * `enrollment.courseSlug` field (server/src/services/studentCourseService.js
+   * #serializeEnrollment) below — never a hardcoded per-course guess.
+   */
   courseSlug?: string;
   showModuleBreakdownInitially?: boolean;
 }
@@ -27,9 +34,10 @@ export const CourseCard: React.FC<CourseCardProps> = ({
   enrollment,
   totalLectures,
   completedLectures,
-  courseSlug = "nre-step-1-complete",
+  courseSlug,
   showModuleBreakdownInitially = false,
 }) => {
+  const resolvedCourseSlug = courseSlug ?? enrollment.courseSlug;
   const [showModules, setShowModules] = useState(showModuleBreakdownInitially);
 
   const isExpired = enrollment.status === "expired" || (enrollment.remainingDays !== undefined && enrollment.remainingDays <= 0);
@@ -122,7 +130,7 @@ export const CourseCard: React.FC<CourseCardProps> = ({
           </button>
 
           {isExpired ? (
-            <Link to={`/checkout/${courseSlug}`}>
+            <Link to={resolvedCourseSlug ? `/checkout/${resolvedCourseSlug}` : "/courses"}>
               <Button size="sm" variant="danger" icon={<RefreshCw className="w-3.5 h-3.5" />}>
                 Renew Subscription
               </Button>
