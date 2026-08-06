@@ -21,6 +21,11 @@ const FACULTY = [
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
+    if (process.env.SEED_MODE === 'prod') {
+      console.log('[seed:faculty] skipped — SEED_MODE=prod (demo-only placeholder bios).');
+      return;
+    }
+
     const now = new Date();
     const [[{ cnt }]] = await queryInterface.sequelize.query('SELECT COUNT(*) AS cnt FROM faculty');
     if (Number(cnt) >= FACULTY.length) {

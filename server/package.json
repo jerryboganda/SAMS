@@ -1,7 +1,7 @@
 {
   "name": "sams-academy-server",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -13,10 +13,12 @@
     "migrate:undo": "sequelize-cli db:migrate:undo",
     "migrate:undo:all": "sequelize-cli db:migrate:undo:all",
     "seed": "sequelize-cli db:seed:all",
+    "seed:prod": "cross-env SEED_MODE=prod sequelize-cli db:seed:all",
     "seed:undo": "sequelize-cli db:seed:undo:all",
     "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "test:e2e": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand tests/e2e",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "smoke": "node scripts/smoke/prodSmoke.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

@@ -5,6 +5,11 @@ const COUPON_CODE = 'WELCOME10';
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
+    if (process.env.SEED_MODE === 'prod') {
+      console.log('[seed:coupon] skipped — SEED_MODE=prod (demo-only content).');
+      return;
+    }
+
     const now = new Date();
     const [existing] = await queryInterface.sequelize.query('SELECT id FROM coupons WHERE code = :code', {
       replacements: { code: COUPON_CODE },

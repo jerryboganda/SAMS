@@ -24,6 +24,11 @@ const SECTIONS = [
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
+    if (process.env.SEED_MODE === 'prod') {
+      console.log('[seed:course] skipped — SEED_MODE=prod (demo-only content).');
+      return;
+    }
+
     const now = new Date();
 
     const [existingCourse] = await queryInterface.sequelize.query(

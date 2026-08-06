@@ -39,6 +39,11 @@ function buildOptionPool(subject, system) {
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
+    if (process.env.SEED_MODE === 'prod') {
+      console.log('[seed:questions] skipped — SEED_MODE=prod (demo-only content).');
+      return;
+    }
+
     const now = new Date();
 
     const [[{ cnt }]] = await queryInterface.sequelize.query('SELECT COUNT(*) AS cnt FROM questions');

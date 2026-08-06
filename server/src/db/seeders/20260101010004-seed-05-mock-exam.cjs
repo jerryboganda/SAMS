@@ -5,6 +5,11 @@ const MOCK_EXAM_TITLE = 'NRE Step 1 Mock Exam 1';
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
+    if (process.env.SEED_MODE === 'prod') {
+      console.log('[seed:mock-exam] skipped — SEED_MODE=prod (demo-only content).');
+      return;
+    }
+
     const now = new Date();
 
     const [existing] = await queryInterface.sequelize.query(

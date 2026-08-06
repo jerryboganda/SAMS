@@ -37,6 +37,11 @@ function toDateOnly(d) {
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
+    if (process.env.SEED_MODE === 'prod') {
+      console.log('[seed:demo-activity] skipped — SEED_MODE=prod (demo-only content).');
+      return;
+    }
+
     const now = new Date();
 
     const [[user]] = await queryInterface.sequelize.query('SELECT id FROM users WHERE email = :email', {

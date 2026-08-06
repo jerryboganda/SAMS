@@ -1,12 +1,14 @@
 {
   "name": "sams-academy",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "SAMS Academy — secure medical exam-prep LMS (video courses + QBank + mock exams + payments + admin panel).",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
+    "postinstall": "npm run install:all",
+    "install:all": "npm install --prefix server && npm install --prefix client",
     "dev": "concurrently -n server,client -c \"blue,green\" \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "npm run dev --prefix server",
     "dev:client": "npm run dev --prefix client",
@@ -16,11 +18,13 @@
     "migrate:undo": "npm run migrate:undo --prefix server",
     "migrate:undo:all": "npm run migrate:undo:all --prefix server",
     "seed": "npm run seed --prefix server",
+    "seed:prod": "npm run seed:prod --prefix server",
     "seed:undo": "npm run seed:undo --prefix server",
     "lint": "npm run lint --prefix server && npm run lint --prefix client",
+    "smoke": "npm run smoke --prefix server",
     "test": "npm run test --prefix server && npm run test --prefix client",
     "verify": "npm run lint && npm run test && npm run build",
-    "package": "echo \"TODO: Phase 14 deploy.zip builder\" && exit 1"
+    "package": "node scripts/package/buildDeployZip.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

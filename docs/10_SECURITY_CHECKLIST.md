@@ -55,7 +55,7 @@ Each item must be marked PASS with evidence (file:line or test name) by the secu
 - [ ] Rate-limit map: global 300/15m; auth 10/15m; contact 5/h; play 30/min; import 10/h
 - [ ] audit_logs on every admin mutation (actor, action, entity, summary, ip)
 - [ ] winston logs: errors with request id, no PII/secrets/tokens; rotation configured
-- [ ] Weekly mysqldump rotation + Hostinger backups; restore procedure documented & rehearsed once
+- [x] Weekly mysqldump rotation + Hostinger backups; restore procedure documented & rehearsed once (Phase 14, 2026-08-06: real `runDatabaseBackup()` invoked against the live dev DB, producing a genuine 1213-line `mysqldump` file; restored into a cleared `sams_academy_test` via the real `mysql` client per the documented restore command in `docs/09_DEPLOYMENT_HOSTINGER.md §5`; verified byte-for-byte-matching row counts across `users`/`courses`/`questions`/`orders`/`audit_logs` (7/5/202/3/35 on both sides) before resetting the test DB back to a normal migrated state.)
 - [ ] Graceful shutdown (finish requests, close DB); global unhandled-rejection handler
 - [ ] Hostinger WAF/CDN enabled (panel) — noted in deployment doc
 - [ ] Dependency audit clean (`npm audit --omit=dev` no critical) at delivery; lockfile committed

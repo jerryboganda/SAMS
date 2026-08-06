@@ -8,6 +8,9 @@ client/dist/
 server/dist/
 build/
 coverage/
+# Phase 14.3 deploy packaging output (scripts/package/buildDeployZip.mjs) —
+# generated at repo root by `npm run package`, never committed.
+/deploy.zip
 
 # Env
 .env
