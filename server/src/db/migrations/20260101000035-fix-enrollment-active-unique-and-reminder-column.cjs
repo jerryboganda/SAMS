@@ -56,8 +56,14 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
+    // No explicit `NULL` after `VIRTUAL` — MySQL 8 accepts it, but MariaDB
+    // (what Hostinger's shared-hosting MySQL databases actually run,
+    // confirmed live: `mysql --version` -> 11.8.8-MariaDB) rejects it with a
+    // syntax error. Virtual generated columns are nullable by default in
+    // both engines, so omitting the keyword is a no-op for MySQL 8 and the
+    // fix for MariaDB — one statement works on both.
     await queryInterface.sequelize.query(
-      "ALTER TABLE `enrollments` ADD COLUMN `active_slot` TINYINT GENERATED ALWAYS AS (IF(`status` = 'active', 1, NULL)) VIRTUAL NULL AFTER `status`"
+      "ALTER TABLE `enrollments` ADD COLUMN `active_slot` TINYINT GENERATED ALWAYS AS (IF(`status` = 'active', 1, NULL)) VIRTUAL AFTER `status`"
     );
 
     // The old `uq_enr_active` (user_id, course_id, status) is InnoDB's ONLY
