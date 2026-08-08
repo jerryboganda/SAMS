@@ -84,14 +84,21 @@ export const HomePage: React.FC = () => {
     },
   ];
 
-  // Auto-rotating testimonial slider — advances one slide every 3s, loops.
-  const [activeTestimonial, setActiveTestimonial] = useState(0);
+  // Auto-rotating testimonial slider — groups of up to 3 cards per slide
+  // (same layout as the old static grid), advances one slide every 3s, loops.
+  const TESTIMONIALS_PER_SLIDE = 3;
+  const testimonialSlides: (typeof testimonials)[number][][] = [];
+  for (let i = 0; i < testimonials.length; i += TESTIMONIALS_PER_SLIDE) {
+    testimonialSlides.push(testimonials.slice(i, i + TESTIMONIALS_PER_SLIDE));
+  }
+
+  const [activeTestimonialSlide, setActiveTestimonialSlide] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => {
-      setActiveTestimonial((prev) => (prev + 1) % testimonials.length);
+      setActiveTestimonialSlide((prev) => (prev + 1) % testimonialSlides.length);
     }, 3000);
     return () => clearInterval(timer);
-  }, [testimonials.length]);
+  }, [testimonialSlides.length]);
 
   return (
     <div className="space-y-16 pb-16">
@@ -350,46 +357,50 @@ export const HomePage: React.FC = () => {
           <p className="text-sm text-slate-300">Read what successful candidates say about preparing with SAMS Academy.</p>
         </div>
 
-        {/* Sliding track — one testimonial in view at a time, auto-advances every 3s */}
-        <div className="relative overflow-hidden max-w-2xl mx-auto">
+        {/* Sliding track — up to 3 testimonials per slide, auto-advances every 3s */}
+        <div className="relative overflow-hidden">
           <div
             className="flex transition-transform duration-700 ease-in-out"
-            style={{ transform: `translateX(-${activeTestimonial * 100}%)` }}
+            style={{ transform: `translateX(-${activeTestimonialSlide * 100}%)` }}
           >
-            {testimonials.map((t) => (
-              <div key={t.id} className="w-full flex-shrink-0 px-1">
-                <Card className="bg-[#0B1A2C] border-slate-700/80 text-white p-6 sm:p-8 flex flex-col justify-between space-y-4 min-h-[220px]">
-                  <div className="space-y-3">
-                    <Quote className="w-8 h-8 text-[#0FA3A3] opacity-80" />
-                    <p className="text-sm text-slate-100 leading-relaxed italic font-normal">"{t.quote}"</p>
-                  </div>
-
-                  <div className="flex items-center gap-3 pt-3 border-t border-slate-800">
-                    <img src={t.avatar} alt={t.name} className="w-10 h-10 rounded-full object-cover border border-[#0FA3A3]" />
-                    <div>
-                      <h4 className="text-sm font-bold text-white">{t.name}</h4>
-                      <p className="text-[11px] text-[#0FA3A3] font-medium">{t.exam}</p>
+            {testimonialSlides.map((slide, slideIndex) => (
+              <div key={slideIndex} className="w-full flex-shrink-0 grid grid-cols-1 md:grid-cols-3 gap-6 px-1">
+                {slide.map((t) => (
+                  <Card key={t.id} className="bg-[#0B1A2C] border-slate-700/80 text-white p-6 flex flex-col justify-between space-y-4">
+                    <div className="space-y-3">
+                      <Quote className="w-8 h-8 text-[#0FA3A3] opacity-80" />
+                      <p className="text-xs text-slate-100 leading-relaxed italic font-normal">"{t.quote}"</p>
                     </div>
-                  </div>
-                </Card>
+
+                    <div className="flex items-center gap-3 pt-3 border-t border-slate-800">
+                      <img src={t.avatar} alt={t.name} className="w-10 h-10 rounded-full object-cover border border-[#0FA3A3]" />
+                      <div>
+                        <h4 className="text-sm font-bold text-white">{t.name}</h4>
+                        <p className="text-[11px] text-[#0FA3A3] font-medium">{t.exam}</p>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
               </div>
             ))}
           </div>
         </div>
 
-        {/* Dot pagination — click to jump, active dot mirrors the auto-rotation */}
-        <div className="flex items-center justify-center gap-2">
-          {testimonials.map((t, i) => (
-            <button
-              key={t.id}
-              onClick={() => setActiveTestimonial(i)}
-              aria-label={`Show testimonial from ${t.name}`}
-              className={`h-2 rounded-full transition-all cursor-pointer ${
-                i === activeTestimonial ? "w-6 bg-[#0FA3A3]" : "w-2 bg-slate-600 hover:bg-slate-500"
-              }`}
-            />
-          ))}
-        </div>
+        {/* Dot pagination — one dot per slide, click to jump, mirrors the auto-rotation */}
+        {testimonialSlides.length > 1 && (
+          <div className="flex items-center justify-center gap-2">
+            {testimonialSlides.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveTestimonialSlide(i)}
+                aria-label={`Show testimonial slide ${i + 1}`}
+                className={`h-2 rounded-full transition-all cursor-pointer ${
+                  i === activeTestimonialSlide ? "w-6 bg-[#0FA3A3]" : "w-2 bg-slate-600 hover:bg-slate-500"
+                }`}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* FINAL CTA BAND */}
