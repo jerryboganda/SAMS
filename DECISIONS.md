@@ -1133,3 +1133,21 @@ were then set directly in the live deployment's environment variables (not
 committed to git) to activate it. Remove both from the Hostinger env vars
 once manual QA is finished — the code itself can stay, it's a no-op without
 them.
+
+## 2026-08-08 — Hostinger platform quirk: env vars are snapshotted at deploy time, not re-read on process restart
+
+Discovered while activating the fixed-OTP bypass above: directly editing
+`hbuilds/config/.env` on the server via SSH and then restarting the app
+process (`kill -TERM` on the `lsnode:` PIDs — the app's own graceful-
+shutdown handler cleanly respawns it, confirmed safe and repeatable) does
+**not** pick up the edited values. `/proc/<pid>/environ` on the respawned
+process kept showing a stale snapshot from the *previous* real deploy,
+not my hand-edited file. Conclusion: Hostinger's LiteSpeed `lsnode`
+launcher reads/caches the environment once per real deploy cycle (triggered
+by a GitHub push or the hPanel "Redeploy" button), not per process restart
+— a bare SIGTERM/respawn reuses whatever env block the launcher cached at
+the last real deploy. **To change env vars that actually take effect,
+either edit them in hPanel → Environment variables (which triggers a real
+redeploy itself), or push a new commit** — editing the on-disk `.env` file
+over SSH alone is not suficient, even though the file itself does get
+updated.
