@@ -97,7 +97,7 @@ export const CoursesPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-10 pb-16">
+    <div className="space-y-10 pb-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
       {/* Header Banner */}
       <div className="bg-[#0E2A47] text-white p-8 sm:p-12 rounded-3xl space-y-4 shadow-lg relative overflow-hidden">
         <div className="absolute -right-12 -bottom-12 w-80 h-80 bg-[#0FA3A3]/20 rounded-full blur-3xl pointer-events-none" />
