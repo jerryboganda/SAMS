@@ -50,25 +50,48 @@ export const HomePage: React.FC = () => {
     {
       id: 1,
       name: "Dr. Usama Tanveer",
-      exam: "Cleared NRE Step 1 (Score: 78%)",
-      quote: "SAMS Academy's NRE Step 1 QBank and high-yield video lectures were instrumental in passing on my very first attempt. The clinical vignette style matched the actual exam remarkably well.",
-      avatar: "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&w=200&q=80",
+      exam: "Cleared NRE Step 1 — Score 78%",
+      quote: "I was honestly dreading NRE Step 1 after hearing how unpredictable the vignettes can be. Going through the QBank daily and reviewing my wrong answers every night made the actual exam feel familiar instead of scary. Passed on my first try.",
+      avatar: "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&w=200&h=200&q=80",
     },
     {
       id: 2,
       name: "Dr. Fatima Zahra",
-      exam: "Passed SMLE (Saudi Licensing)",
-      quote: "The system-wise breakdown of Pharmacology and Pathology made my SMLE revision structured and stress-free. The DRM video player worked smoothly on my laptop.",
-      avatar: "https://images.unsplash.com/photo-1594824813571-27a3f0677161?auto=format&fit=crop&w=200&q=80",
+      exam: "Passed SMLE — Riyadh",
+      quote: "What helped me most was how the lectures were split system by system instead of one giant playlist. I could tell exactly where I was weak just by looking at my scores, so revision stopped feeling random and started feeling targeted.",
+      avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&h=200&q=80",
     },
     {
       id: 3,
       name: "Dr. Bilal Hassan",
-      exam: "NRE Step 1 Candidate",
-      quote: "The performance analytics identified my weaknesses in Renal pathology early on. Practicing in Exam Mode prepared me for actual timed exam pressure.",
-      avatar: "https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&w=200&q=80",
+      exam: "NRE Step 1 — In Progress",
+      quote: "The Exam Mode timer genuinely changed how I study. I used to know the material but freeze under time pressure during practice tests. After a few weeks of timed mocks, that panic just went away.",
+      avatar: "https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&w=200&h=200&q=80",
+    },
+    {
+      id: 4,
+      name: "Dr. Ayesha Raza",
+      exam: "Cleared DHA — Dubai",
+      quote: "I was studying while working full-time, so I needed something I could pick up in 20-minute chunks between shifts. Being able to resume a lecture exactly where I left off, and jump straight into a quick QBank set, made that actually workable.",
+      avatar: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=200&h=200&q=80",
+    },
+    {
+      id: 5,
+      name: "Dr. Hamza Sheikh",
+      exam: "Passed USMLE Step 1",
+      quote: "My biggest issue was Pharmacology — I kept mixing up drug classes under time pressure. The bookmark feature let me build my own \"weak topics\" test out of every question I'd previously flagged, and I redid that set until it stopped being a weak topic.",
+      avatar: "https://images.unsplash.com/photo-1618498082410-b4aa22193b38?auto=format&fit=crop&w=200&h=200&q=80",
     },
   ];
+
+  // Auto-rotating testimonial slider — advances one slide every 3s, loops.
+  const [activeTestimonial, setActiveTestimonial] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveTestimonial((prev) => (prev + 1) % testimonials.length);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [testimonials.length]);
 
   return (
     <div className="space-y-16 pb-16">
@@ -327,22 +350,44 @@ export const HomePage: React.FC = () => {
           <p className="text-sm text-slate-300">Read what successful candidates say about preparing with SAMS Academy.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {testimonials.map((t) => (
-            <Card key={t.id} className="bg-[#0B1A2C] border-slate-700/80 text-white p-6 flex flex-col justify-between space-y-4">
-              <div className="space-y-3">
-                <Quote className="w-8 h-8 text-[#0FA3A3] opacity-80" />
-                <p className="text-xs text-slate-100 leading-relaxed italic font-normal">"{t.quote}"</p>
-              </div>
+        {/* Sliding track — one testimonial in view at a time, auto-advances every 3s */}
+        <div className="relative overflow-hidden max-w-2xl mx-auto">
+          <div
+            className="flex transition-transform duration-700 ease-in-out"
+            style={{ transform: `translateX(-${activeTestimonial * 100}%)` }}
+          >
+            {testimonials.map((t) => (
+              <div key={t.id} className="w-full flex-shrink-0 px-1">
+                <Card className="bg-[#0B1A2C] border-slate-700/80 text-white p-6 sm:p-8 flex flex-col justify-between space-y-4 min-h-[220px]">
+                  <div className="space-y-3">
+                    <Quote className="w-8 h-8 text-[#0FA3A3] opacity-80" />
+                    <p className="text-sm text-slate-100 leading-relaxed italic font-normal">"{t.quote}"</p>
+                  </div>
 
-              <div className="flex items-center gap-3 pt-3 border-t border-slate-800">
-                <img src={t.avatar} alt={t.name} className="w-10 h-10 rounded-full object-cover border border-[#0FA3A3]" />
-                <div>
-                  <h4 className="text-sm font-bold text-white">{t.name}</h4>
-                  <p className="text-[11px] text-[#0FA3A3] font-medium">{t.exam}</p>
-                </div>
+                  <div className="flex items-center gap-3 pt-3 border-t border-slate-800">
+                    <img src={t.avatar} alt={t.name} className="w-10 h-10 rounded-full object-cover border border-[#0FA3A3]" />
+                    <div>
+                      <h4 className="text-sm font-bold text-white">{t.name}</h4>
+                      <p className="text-[11px] text-[#0FA3A3] font-medium">{t.exam}</p>
+                    </div>
+                  </div>
+                </Card>
               </div>
-            </Card>
+            ))}
+          </div>
+        </div>
+
+        {/* Dot pagination — click to jump, active dot mirrors the auto-rotation */}
+        <div className="flex items-center justify-center gap-2">
+          {testimonials.map((t, i) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTestimonial(i)}
+              aria-label={`Show testimonial from ${t.name}`}
+              className={`h-2 rounded-full transition-all cursor-pointer ${
+                i === activeTestimonial ? "w-6 bg-[#0FA3A3]" : "w-2 bg-slate-600 hover:bg-slate-500"
+              }`}
+            />
           ))}
         </div>
       </section>
