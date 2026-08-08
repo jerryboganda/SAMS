@@ -100,6 +100,16 @@ const envSchema = z.object({
   SAFEPAY_SECRET: z.string().default(''),
 
   ADMIN_ALERT_EMAIL: z.string().default('admin@example.com'),
+
+  // TEMPORARY manual-QA escape hatch (2026-08-08, user-requested) — see the
+  // loud production warning below and DECISIONS.md's 2026-08-08 entry.
+  // Empty by default (feature is a no-op unless BOTH vars are set); only
+  // bypasses the login-reverify (new-device/suspicious-login) email-code
+  // check in authService.js#reverifyLogin, and only for the exact emails
+  // listed. Delete DEV_FIXED_OTP_CODE/DEV_FIXED_OTP_EMAILS from the
+  // deployment's env vars (or set DEV_FIXED_OTP_CODE='') to remove.
+  DEV_FIXED_OTP_CODE: z.string().default(''),
+  DEV_FIXED_OTP_EMAILS: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -150,6 +160,19 @@ if (env.NODE_ENV === 'production' && env.PAYMENTS_ENABLED_GATEWAYS.split(',').ma
     '[env] WARNING: PAYMENTS_ENABLED_GATEWAYS includes "mock" while NODE_ENV=production. ' +
       'The mock gateway always auto-succeeds with zero payment verification — any student can get ' +
       'any course for free. Remove "mock" from PAYMENTS_ENABLED_GATEWAYS before going live.'
+  );
+}
+
+// Same pattern as the "mock" gateway warning above, for the same reason:
+// a deliberate, narrowly-scoped dev/QA convenience that must never be
+// forgotten in a real production deploy. Fires on every boot as long as
+// the vars are set, specifically so it can't go unnoticed in the logs.
+if (env.DEV_FIXED_OTP_CODE && env.DEV_FIXED_OTP_EMAILS) {
+  console.warn(
+    `[env] WARNING: DEV_FIXED_OTP_CODE is active for login-reverify on: ${env.DEV_FIXED_OTP_EMAILS}. ` +
+      'This is a manual-QA-only bypass of a real security check (new-device/suspicious-login email ' +
+      'verification) — remove DEV_FIXED_OTP_CODE and DEV_FIXED_OTP_EMAILS from the environment as soon ' +
+      'as manual testing is done.'
   );
 }
 

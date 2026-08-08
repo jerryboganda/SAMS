@@ -420,25 +420,38 @@ export async function reverifyLogin({ email, code }, req, res) {
     throw new ApiError(400, 'INVALID_CODE', 'Invalid or expired verification code.');
   }
 
-  const tokenHash = sha256Hex(code);
-  const ott = await OneTimeToken.findOne({
-    where: { userId: user.id, purpose: 'reverify_login', tokenHash },
-    order: [['createdAt', 'DESC']],
-  });
-  if (!ott || ott.usedAt || ott.expiresAt < new Date()) {
-    await logEvent({
-      userId: user.id,
-      emailTried: normalizedEmail,
-      status: 'failed',
-      reason: 'reverify_invalid_code',
-      ip,
-      userAgent,
-    });
-    throw new ApiError(400, 'INVALID_CODE', 'Invalid or expired verification code.');
-  }
+  // TEMPORARY manual-QA escape hatch (2026-08-08, user-requested — see the
+  // loud env.js startup warning and DECISIONS.md's 2026-08-08 entry). Empty
+  // by default; only trips when BOTH DEV_FIXED_OTP_CODE and
+  // DEV_FIXED_OTP_EMAILS are explicitly set AND this exact user+code match.
+  // Skips the real one-time-token check entirely for this one request —
+  // does not touch/consume any real OneTimeToken row, no other user or
+  // flow is affected. Remove the two env vars to fully disable.
+  const devBypassEmails = env.DEV_FIXED_OTP_EMAILS.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const isDevOtpBypass =
+    env.DEV_FIXED_OTP_CODE && code === env.DEV_FIXED_OTP_CODE && devBypassEmails.includes(normalizedEmail);
 
-  ott.usedAt = new Date();
-  await ott.save();
+  if (!isDevOtpBypass) {
+    const tokenHash = sha256Hex(code);
+    const ott = await OneTimeToken.findOne({
+      where: { userId: user.id, purpose: 'reverify_login', tokenHash },
+      order: [['createdAt', 'DESC']],
+    });
+    if (!ott || ott.usedAt || ott.expiresAt < new Date()) {
+      await logEvent({
+        userId: user.id,
+        emailTried: normalizedEmail,
+        status: 'failed',
+        reason: 'reverify_invalid_code',
+        ip,
+        userAgent,
+      });
+      throw new ApiError(400, 'INVALID_CODE', 'Invalid or expired verification code.');
+    }
+
+    ott.usedAt = new Date();
+    await ott.save();
+  }
 
   const matchResult = await matchDevice(user.id, req);
   await assertDeviceCapacity(user.id, matchResult.isNewCandidate);

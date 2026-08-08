@@ -1090,3 +1090,46 @@ Written directly by the orchestrator (full project context already in hand from 
 `npm run lint` — 0 errors (server: 2 pre-existing unrelated warnings; client: 242, unchanged baseline). `npm run test --prefix server` — **96/96 suites, 902/902 tests, unchanged** (pure seeder/script/doc changes this phase — zero application-logic behavior change, confirmed by an unchanged test count). `npm run test --prefix client` — **11/11 files, 161/161 tests, unchanged**. `npx tsc --noEmit --prefix client` — 0 errors. `npm run build` — succeeds. `npm run smoke` — **8/8 PASS**, independently re-run solo by the orchestrator after `devops-docs`'s dispatch, not just trusted from its report. `npm run package` — independently re-run solo, zip contents personally inspected and grepped for forbidden entries (zero found). Every new/changed high-risk file (the SMTP-test-endpoint-equivalent-risk-level `prodSmoke.js`/`buildDeployZip.mjs` shell-out logic, the split seeder files) was read in full by the orchestrator, not just trusted from each dispatch's own summary — consistent with this project's established discipline across all 15 phases.
 
 **Phase 14 (Delivery) is now fully complete — and with it, `docs/07_EXECUTION_PLAN.md`'s entire Phase 0 through Phase 14 checklist.** `COMPLETION_REPORT.md` is the definitive final-state document. **SAMS Academy v1.0.0.**
+
+## 2026-08-08 — Manual-QA fixed-OTP bypass (post-v1.0.0, live deployment)
+
+User requested two real test accounts on the live production DB
+(`mindreader420123@gmail.com` admin, `mindreader_420@yahoo.com` student,
+shared password) so they could personally test the whole system end-to-end
+on the real Hostinger deployment, plus a fixed `000000` code that always
+works wherever an OTP/verification code is required, to avoid needing real
+email delivery during that manual pass. Explicitly acknowledged as
+temporary, to be removed by the user once QA is done.
+
+Both accounts were created directly via SSH + `mysql` client (bcrypt-hashed
+locally with the same 12-round config the app uses, `email_verified_at` set,
+`twofa_enabled=false`) — not through the public registration flow, since
+these accounts didn't need to prove anything about that flow.
+
+The fixed-code request itself was narrowed before implementing, not built
+as asked verbatim: a permanent, unconditional "000000 always works" bypass
+across every OTP surface (2FA, reverify, password reset) would be a real
+backdoor sitting in checked-in source on a GitHub repo indefinitely — the
+exact class of thing `docs/10_SECURITY_CHECKLIST.md` exists to catch, and a
+promise to "delete it later" is not a control. Implemented instead as:
+
+- Two new env vars, both blank by default (`DEV_FIXED_OTP_CODE`,
+  `DEV_FIXED_OTP_EMAILS`) — the feature is fully inert unless both are
+  explicitly set in the deployment's environment, so removing them (not a
+  code change) fully disables it.
+- The bypass only applies inside `authService.js#reverifyLogin` (the
+  new-device/suspicious-login email-code check) — not 2FA, not password
+  reset. TOTP 2FA was left disabled on both test accounts instead, since
+  that alone already removes that prompt without touching auth logic.
+- Scoped to an exact email allow-list, not "any user" — a real user's
+  account is never affected even if `000000` is guessed.
+- A loud `console.warn` fires on every server boot whenever both vars are
+  set, naming exactly which emails are covered — mirrors the existing
+  `PAYMENTS_ENABLED_GATEWAYS=mock`-in-production warning pattern in
+  `env.js`, specifically so this can't silently linger unnoticed.
+
+`DEV_FIXED_OTP_CODE=000000` / `DEV_FIXED_OTP_EMAILS=mindreader420123@gmail.com,mindreader_420@yahoo.com`
+were then set directly in the live deployment's environment variables (not
+committed to git) to activate it. Remove both from the Hostinger env vars
+once manual QA is finished — the code itself can stay, it's a no-op without
+them.
