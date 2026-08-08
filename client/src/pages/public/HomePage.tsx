@@ -73,7 +73,7 @@ export const HomePage: React.FC = () => {
   return (
     <div className="space-y-16 pb-16">
       {/* HERO SECTION */}
-      <section className="relative overflow-hidden bg-[#0E2A47] text-white pt-14 pb-20 px-4 sm:px-8 lg:px-12 rounded-b-3xl sm:rounded-3xl max-w-7xl mx-auto shadow-xl">
+      <section className="relative overflow-hidden bg-[#0E2A47] text-white pt-14 pb-20 px-4 sm:px-8 lg:px-12 rounded-b-3xl max-w-7xl mx-auto shadow-xl">
         {/* Subtle Background Pattern & Medical Glow Accent */}
         <div className="absolute inset-0 bg-[radial-gradient(#0FA3A3_1px,transparent_1px)] [background-size:24px_24px] opacity-15 pointer-events-none" />
         <div className="absolute -top-24 -right-24 w-96 h-96 bg-[#0FA3A3]/20 rounded-full blur-3xl pointer-events-none" />
