@@ -199,14 +199,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // Demo Preset Handlers
-  const applyPreset = (presetEmail: string, presetPw: string) => {
-    setEmail(presetEmail);
-    setPassword(presetPw);
-    setErrorMessage("");
-    setActiveScreen("normal");
-  };
-
   // ---------------------------------------------------------------------------
   // SCREEN 1: 423 DEVICE_LIMIT_REACHED
   // ---------------------------------------------------------------------------
@@ -502,73 +494,6 @@ export const LoginPage: React.FC = () => {
             <span>{sessionExpiredMessage}</span>
           </div>
         )}
-
-        {/* Quick Demo Credentials Presets Bar */}
-        <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-          <div className="flex items-center justify-between text-[10px] font-bold text-[#0E2A47] uppercase tracking-wider">
-            <span>Quick Testing Presets</span>
-            <span className="text-slate-400 font-normal">Click to load</span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[11px]">
-            <button
-              type="button"
-              onClick={() => applyPreset("student@samsacademy.com", "Student@123")}
-              className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-[#0FA3A3] font-semibold text-left truncate"
-            >
-              🎓 Student
-            </button>
-
-            <button
-              type="button"
-              onClick={() => applyPreset("admin@samsacademy.com", "Admin@12345")}
-              className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-amber-500 font-semibold text-left truncate"
-            >
-              🛡️ Admin
-            </button>
-
-            {/* The remaining presets only work against the mock login
-                simulation (client/src/api/endpoints/auth.ts) — none of
-                these synthetic emails exist as real seeded accounts, so
-                they're hidden once CONFIG.USE_MOCK is false to avoid
-                misleading real users. See DECISIONS.md 2026-07-31. */}
-            {CONFIG.USE_MOCK && (
-            <>
-            <button
-              type="button"
-              onClick={() => applyPreset("student+limit@samsacademy.com", "Student@123")}
-              className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-rose-700 hover:border-rose-400 font-semibold text-left truncate"
-            >
-              📱 2-Device
-            </button>
-
-            <button
-              type="button"
-              onClick={() => applyPreset("student+2fa@samsacademy.com", "Student@123")}
-              className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-teal-700 hover:border-teal-400 font-semibold text-left truncate"
-            >
-              🔐 2FA Code
-            </button>
-
-            <button
-              type="button"
-              onClick={() => applyPreset("student+suspicious@samsacademy.com", "Student@123")}
-              className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-amber-700 hover:border-amber-400 font-semibold text-left truncate"
-            >
-              🛡️ Reverify
-            </button>
-
-            <button
-              type="button"
-              onClick={() => applyPreset("student+locked@samsacademy.com", "Student@123")}
-              className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-red-700 hover:border-red-400 font-semibold text-left truncate"
-            >
-              🔒 Locked
-            </button>
-            </>
-            )}
-          </div>
-        </div>
 
         {/* Form Error Banner */}
         {errorMessage && (
