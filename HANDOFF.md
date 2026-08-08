@@ -4,6 +4,8 @@
 
 Read `CLAUDE.md` (repo root) first — it is still the governing law for this project (fixed tech stack, scope exclusions, autonomy rules, engineering conventions). This file supplements it with **current state** and **what's left**. `docs/07_EXECUTION_PLAN.md` is the authoritative task checklist; `DECISIONS.md` is the authoritative log of every judgment call made so far — both are large and worth reading in full before making changes, not just skimming this summary.
 
+**🚀 The app is now actually deployed and live on Hostinger (2026-08-06 onward, real production work, post-v1.0.0)** — this happened *after* everything else in this file, which otherwise still describes the Phase 0–14 build. **Before doing ANY server-side production task (migrations, seeds, checking real logs/env, restarting the app), read `docs/09_DEPLOYMENT_HOSTINGER.md` §8 in full** — it documents the SSH key set up specifically so an AI agent can do this work directly (connection details, directory layout, the MariaDB-not-MySQL8 gotcha, the "env vars snapshot at deploy time not process-restart time" quirk that will silently waste your time if you don't know it, and the current live domain/DB-access state). `DECISIONS.md`'s 2026-08-07 and 2026-08-08 entries have the full narrative of every production incident found and fixed.
+
 ---
 
 ## 1. Current state

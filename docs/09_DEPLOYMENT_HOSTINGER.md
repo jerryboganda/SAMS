@@ -82,3 +82,85 @@ GitHub method: merge to `main` → auto build+deploy (zero-touch). ZIP method: `
 
 ## 7. Pre-deploy smoke test (recommended, local)
 Before pushing/uploading a release, run `npm run smoke` (`server/scripts/smoke/prodSmoke.js`, Phase 14.1) locally: it runs migrations, boots a real `NODE_ENV=production` server on a scratch port (default 5099), and asserts `/api/v1/health` reports `db:true`, `/api/v1/public/courses` responds, the SPA deep-link fallback (`GET /courses`) returns `200 text/html`, and the CSP/`X-Frame-Options` security headers (set by `helmet()` in `server/src/app.js` — see `docs/10_SECURITY_CHECKLIST.md §A` for the full policy) are present — then shuts the server down cleanly. It prints a clear PASS/FAIL line per check and exits non-zero on any failure, so it's safe to wire into a pre-push hook or CI step. It never invents its own database — point it at a throwaway DB via `DB_NAME=<db>` if you don't want it touching your real dev database (see the script's own header comment for the full flag list).
+
+## 8. SSH access for AI-assisted / automated production tasks
+
+An SSH key was set up 2026-08-08 so a future session (human or AI agent) can do server-side production work — running migrations/seeds, reading real logs, checking live process/env state — without needing a human at a browser for every step. **Read this whole section before touching the production server.**
+
+**Connection details** (current as of 2026-08-08 — re-verify host/port/user from hPanel → the site → Advanced → SSH Access if anything below fails, they can change):
+```
+Host: 46.202.138.251   Port: 65002   User: u372263031
+```
+**Private key**: `C:\Users\Admin\.ssh\sams_deploy\hostinger_sams` (ed25519, no passphrase) — lives **only on the machine that generated it**, is `.gitignore`d/never committed, and is **not** portable to a session running on a different machine. If it's missing:
+1. Generate a new one: `ssh-keygen -t ed25519 -f ~/.ssh/sams_deploy/hostinger_sams -N "" -C "sams-deploy-automation"`.
+2. hPanel → the site → **Advanced → SSH Access**: confirm status is **Active** (toggle it on if not — it's off by default on a fresh app).
+3. Scroll to **SSH keys → Add SSH key** → paste the new `.pub` file's contents, any name (e.g. `sams-deploy-automation`).
+4. Connect: `ssh -p 65002 -i ~/.ssh/sams_deploy/hostinger_sams u372263031@46.202.138.251`.
+
+**Never** type the account's SSH *password* into anything, or ask an AI agent to — key-based auth is the point of this setup precisely so that's never needed again.
+
+### Directory layout on the server
+```
+/home/u372263031/domains/<current-domain>/
+├── public_html/                  # static passthrough, not the real app
+├── hbuilds/
+│   ├── config/.env               # the deployed env file — see the quirk below before editing
+│   ├── current -> versions/<build-uuid>/   # symlink to the live build
+│   ├── versions/<build-uuid>/nodejs/       # actual running app + node_modules (server + client/dist)
+│   └── last-source/               # full source checkout used to build
+```
+**`<current-domain>` changes if the domain is ever reconnected** (e.g. it was `sandybrown-shark-303326.hostingersite.com` before, is `radiopad.eu` as of 2026-08-08 — see HANDOFF.md/DECISIONS.md for why). Always re-derive it rather than hardcoding a path:
+```bash
+ls /home/u372263031/domains/
+```
+
+### Node/npm — not on PATH by default
+```bash
+export PATH=/opt/alt/alt-nodejs20/root/usr/bin:$PATH   # node v20.19.4, npm — confirmed working path 2026-08-08
+```
+
+### The database is MariaDB, not MySQL 8 — despite CLAUDE.md §1
+Confirmed live: `mysql --version` → `11.8.8-MariaDB`. Write migrations/raw SQL to be MariaDB-compatible (see migration `20260101000035`'s fix in `DECISIONS.md`'s 2026-08-08 entry for a real example — MariaDB rejects an explicit `NULL` after `VIRTUAL` in a generated-column definition that MySQL 8 silently accepts). The real DB host for the app to connect to is **`srv1864.hstgr.io`** (or IP `153.92.15.53`), not `localhost` — `localhost`/`127.0.0.1` only works for something running co-located on the DB's own host (e.g. phpMyAdmin), not the Node app's container. Get the current values from hPanel → Databases → Remote MySQL if this ever changes.
+
+### Running migrations / seeds manually
+`sequelize-cli` is a **devDependency**, and Hostinger's automatic `npm install` on deploy omits devDependencies — so `npm run migrate`/`npm run seed:prod` (which call the `sequelize-cli` binary directly) fail with `command not found`. Run it via `npx` instead, from inside `hbuilds/current/nodejs/server`, with the real env sourced:
+```bash
+export PATH=/opt/alt/alt-nodejs20/root/usr/bin:$PATH
+cd /home/u372263031/domains/<current-domain>/hbuilds/current/nodejs/server
+set -a; source /home/u372263031/domains/<current-domain>/hbuilds/config/.env; set +a
+export NODE_ENV=production
+npx --yes sequelize-cli@6.6.2 db:migrate
+npx --yes sequelize-cli@6.6.2 db:seed:all              # or: SEED_MODE=prod npx --yes sequelize-cli@6.6.2 db:seed:all
+```
+
+### ⚠️ Env vars are snapshotted at DEPLOY time, not read on every process restart
+This is the single most important thing to know before changing config. Editing `hbuilds/config/.env` directly over SSH **does** get consumed correctly — but only at the **next real deploy cycle** (a GitHub push, or hPanel's Redeploy button). A bare process restart (see below) reuses whatever env block Hostinger's `lsnode` launcher cached at the *last* real deploy and will **not** pick up a same-session file edit. Concretely:
+- **To change an env var and have it actually take effect right now**: edit it in hPanel → Environment variables (this itself triggers a real redeploy), **or** edit `hbuilds/config/.env` over SSH and then trigger a real deploy yourself — the simplest is pushing any commit to `main` (even a docs-only one), since the repo is GitHub-connected with auto-deploy on push.
+- **What does NOT work**: edit the file, then `kill -TERM` the app process expecting a fresh env — confirmed empirically 2026-08-08, the respawned process still had the stale pre-edit values.
+- Full incident writeup: `DECISIONS.md`'s 2026-08-08 "Hostinger platform quirk" entry.
+
+### Restarting the app process (without a full redeploy)
+Safe for a lightweight restart when you do **not** need new env vars (e.g. after the app hangs, or to clear in-memory state) — it will **not** refresh env, see above:
+```bash
+pgrep -f lsnode                          # find the current PID(s) — sometimes 2 sibling processes
+kill -TERM <pid> [<pid2>]                # graceful; server.js's own SIGTERM handler shuts down cleanly, launcher respawns within ~5s
+```
+Verify it came back: `curl -sk https://<current-domain>/api/v1/health` should return `{"success":true,"data":{"status":"ok","db":true}}` within a few seconds. If `db:false` or it stays down, don't keep retrying blind — check `hbuilds/current/nodejs/console.log` (below) for the real error first.
+
+### Reading real logs
+hPanel's own "Runtime Logs" panel (Websites → site → Runtime logs) was unreliable during 2026-08-07/08 troubleshooting — it repeatedly failed to show fresh entries even minutes after hitting the app. **The actual, reliable source is the log file on disk**:
+```bash
+cat /home/u372263031/domains/<current-domain>/hbuilds/current/nodejs/console.log
+```
+This is a live JSON-lines dump of everything the app's winston logger + raw `console.warn`/`console.error` write (including the `[env]` startup warnings from `server/src/config/env.js` — e.g. the mock-payment-gateway-in-production warning, the fixed-OTP-bypass warning if active). It accumulates across simple process restarts within the same deployed build and resets on a real new deploy.
+
+### Health check
+```bash
+curl -sk https://<current-domain>/api/v1/health
+# {"success":true,"data":{"status":"ok","db":true}}
+```
+
+### Known state as of 2026-08-08 (verify, don't assume — re-check live)
+- Domain: `radiopad.eu` (**temporary** per the user — the site was originally on `sandybrown-shark-303326.hostingersite.com`; check `APP_URL` in Environment variables and `ls /home/u372263031/domains/` if this doc is stale).
+- Remote MySQL access is set to "Any Host" (hPanel → Databases → Remote MySQL) because the app's real outbound IP is IPv6 and didn't match its displayed IPv4 website IP — a real, if narrower-than-ideal, tradeoff; consider pinning to a real static egress IP later if Hostinger support can provide one.
+- Two manual-QA test accounts exist in production (`mindreader420123@gmail.com` admin, `mindreader_420@yahoo.com` student) with a fixed `000000` login-reverify bypass scoped to just those two emails via `DEV_FIXED_OTP_CODE`/`DEV_FIXED_OTP_EMAILS` env vars — see `DECISIONS.md`'s 2026-08-08 entries for the full reasoning and how to remove it.
