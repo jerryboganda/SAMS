@@ -82,9 +82,13 @@ async function logEvent({ userId = null, emailTried = null, status, reason = nul
 }
 
 async function isLockedOut(emailTried) {
+  const normalized = normalizeEmail(emailTried);
+  const user = await User.findOne({ where: { email: normalized }, attributes: ['id', 'role'] });
+  if (user?.role === 'admin') return false;
+
   const count = await LoginEvent.count({
     where: {
-      emailTried,
+      emailTried: normalized,
       status: 'failed',
       createdAt: { [Op.gte]: new Date(Date.now() - LOCKOUT_WINDOW_MINUTES * 60 * 1000) },
     },
@@ -101,9 +105,13 @@ async function isLockedOut(emailTried) {
  * password, so this needs its own (stricter) threshold/window.
  */
 async function isReverifyLockedOut(emailTried) {
+  const normalized = normalizeEmail(emailTried);
+  const user = await User.findOne({ where: { email: normalized }, attributes: ['id', 'role'] });
+  if (user?.role === 'admin') return false;
+
   const count = await LoginEvent.count({
     where: {
-      emailTried,
+      emailTried: normalized,
       status: 'failed',
       reason: 'reverify_invalid_code',
       createdAt: { [Op.gte]: new Date(Date.now() - REVERIFY_LOCKOUT_WINDOW_MINUTES * 60 * 1000) },
@@ -113,6 +121,11 @@ async function isReverifyLockedOut(emailTried) {
 }
 
 async function detectSuspicious({ user, req, matchResult }) {
+  // Admin accounts are completely unrestricted: no suspicious login gating or verification codes on new devices
+  if (user.role === 'admin') {
+    return { suspicious: false, reasons: [], country: null };
+  }
+
   const reasons = [];
   if (matchResult.isNewCandidate) reasons.push('new_device');
   // Fingerprint-only match (no verified device-token cookie) gets the same
@@ -353,7 +366,9 @@ export async function login({ email, password, twofaCode }, req, res) {
   const matchResult = await matchDevice(user.id, req);
 
   try {
-    await assertDeviceCapacity(user.id, matchResult.isNewCandidate);
+    if (user.role !== 'admin') {
+      await assertDeviceCapacity(user.id, matchResult.isNewCandidate, user);
+    }
   } catch (err) {
     await logEvent({
       userId: user.id,
@@ -384,7 +399,7 @@ export async function login({ email, password, twofaCode }, req, res) {
     throw new ApiError(401, 'REVERIFY_REQUIRED', 'Suspicious login detected. A verification code has been emailed to you.');
   }
 
-  const device = await finalizeDevice(user.id, req, res, matchResult);
+  const device = await finalizeDevice(user.id, req, res, matchResult, user);
   const sessionResult = await completeLoginSession(user, device, req, res);
   await logEvent({
     userId: user.id,
@@ -454,9 +469,11 @@ export async function reverifyLogin({ email, code }, req, res) {
   }
 
   const matchResult = await matchDevice(user.id, req);
-  await assertDeviceCapacity(user.id, matchResult.isNewCandidate);
+  if (user.role !== 'admin') {
+    await assertDeviceCapacity(user.id, matchResult.isNewCandidate, user);
+  }
 
-  const device = await finalizeDevice(user.id, req, res, matchResult);
+  const device = await finalizeDevice(user.id, req, res, matchResult, user);
   const sessionResult = await completeLoginSession(user, device, req, res);
   await logEvent({
     userId: user.id,

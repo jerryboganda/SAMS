@@ -183,7 +183,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       throw new ApiError("Login failed", "AUTH_FAILED");
     } catch (err: any) {
-      if (err.code === "DEVICE_LIMIT_REACHED" || err.status === 423) {
+      if (err.code === "DEVICE_LIMIT_REACHED") {
         setDeviceLimitError({
           message: err.message || "Account is active on another primary device (423 DEVICE_LIMIT_REACHED).",
         });

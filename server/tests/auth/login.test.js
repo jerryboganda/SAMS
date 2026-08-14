@@ -173,6 +173,42 @@ describe('POST /api/v1/auth/login', () => {
     expect(stillB.status).toBe(200);
   });
 
+  test('admin role: completely unrestricted — logs in directly on unlimited devices without suspicious codes, device limits, or lockout', async () => {
+    const { user, email, password } = await createVerifiedUser({ email: uniqueEmail('admin-unrestricted'), role: 'admin' });
+
+    // Device 1: logs in directly with 200 (no REVERIFY_REQUIRED)
+    const agent1 = request.agent(app);
+    const res1 = await agent1.post('/api/v1/auth/login').set('User-Agent', 'AdminPC/1.0').send({ email, password });
+    expect(res1.status).toBe(200);
+    expect(res1.body.success).toBe(true);
+
+    // Device 2: logs in directly with 200
+    const agent2 = request.agent(app);
+    const res2 = await agent2.post('/api/v1/auth/login').set('User-Agent', 'AdminLaptop/1.0').send({ email, password });
+    expect(res2.status).toBe(200);
+
+    // Device 3: logs in directly with 200 (no 423 DEVICE_LIMIT_REACHED)
+    const agent3 = request.agent(app);
+    const res3 = await agent3.post('/api/v1/auth/login').set('User-Agent', 'AdminPhone/1.0').send({ email, password });
+    expect(res3.status).toBe(200);
+
+    // Device 4: logs in directly with 200
+    const agent4 = request.agent(app);
+    const res4 = await agent4.post('/api/v1/auth/login').set('User-Agent', 'AdminTablet/1.0').send({ email, password });
+    expect(res4.status).toBe(200);
+
+    // All 4 devices remain active and authenticated concurrently
+    const count = await db.UserDevice.count({ where: { userId: user.id, isActive: true } });
+    expect(count).toBe(4);
+
+    // Admin accounts never get locked out even after consecutive failed attempts
+    for (let i = 0; i < 8; i++) {
+      await request(app).post('/api/v1/auth/login').send({ email, password: 'WrongPassword' });
+    }
+    const correctAfterFails = await request(app).post('/api/v1/auth/login').send({ email, password });
+    expect(correctAfterFails.status).toBe(200);
+  });
+
   // Security audit 2026-07-31, Finding 1 (HIGH): two logins presenting no
   // device_token cookie at all, but an IDENTICAL User-Agent (=> identical
   // fingerprint, since Accept-Language is unset on both) — simulating either

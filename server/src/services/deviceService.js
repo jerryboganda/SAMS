@@ -17,7 +17,7 @@ import { setDeviceTokenCookie } from '../utils/cookies.js';
 import { MAX_ACTIVE_DEVICES } from '../config/constants.js';
 import db from '../models/index.js';
 
-const { UserDevice, RefreshToken } = db;
+const { User, UserDevice, RefreshToken } = db;
 
 /**
  * Fingerprint = sha256(User-Agent + Accept-Language). Good-enough "probably
@@ -78,9 +78,13 @@ export async function matchDevice(userId, req) {
   };
 }
 
-/** Throws 423 DEVICE_LIMIT_REACHED if a genuinely new device would exceed the cap. */
-export async function assertDeviceCapacity(userId, isNewCandidate) {
+/** Throws 423 DEVICE_LIMIT_REACHED if a genuinely new device would exceed the cap. Admin users are exempt. */
+export async function assertDeviceCapacity(userId, isNewCandidate, user = null) {
   if (!isNewCandidate) return;
+
+  const targetUser = user || (await User.findByPk(userId, { attributes: ['id', 'role'] }));
+  if (targetUser?.role === 'admin') return;
+
   const activeCount = await UserDevice.count({ where: { userId, isActive: true } });
   if (activeCount >= MAX_ACTIVE_DEVICES) {
     throw new ApiError(
@@ -108,14 +112,17 @@ export async function assertDeviceCapacity(userId, isNewCandidate) {
  * existing "new stream kills old stream" takeover pattern used elsewhere for
  * video heartbeats. See DECISIONS.md for the full writeup.
  */
-export async function finalizeDevice(userId, req, res, matchResult) {
+export async function finalizeDevice(userId, req, res, matchResult, user = null) {
   const { device, fingerprintHash, isNewCandidate, isFingerprintOnlyMatch } = matchResult;
-  await assertDeviceCapacity(userId, isNewCandidate);
+  await assertDeviceCapacity(userId, isNewCandidate, user);
 
   const rawDeviceToken = randomTokenHex(64);
   const deviceTokenHash = sha256Hex(rawDeviceToken);
   const ip = req.ip || null;
   const userAgent = req.get('user-agent') || null;
+
+  const targetUser = user || (await User.findByPk(userId, { attributes: ['id', 'role'] }));
+  const isAdmin = targetUser?.role === 'admin';
 
   let row = device;
   if (isNewCandidate) {
@@ -129,7 +136,7 @@ export async function finalizeDevice(userId, req, res, matchResult) {
       isActive: true,
     });
   } else {
-    if (isFingerprintOnlyMatch) {
+    if (isFingerprintOnlyMatch && !isAdmin) {
       await RefreshToken.update({ revokedAt: new Date() }, { where: { deviceId: row.id, revokedAt: null } });
     }
     row.deviceTokenHash = deviceTokenHash;
