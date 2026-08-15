@@ -10,6 +10,7 @@ import { createCourse, createSection, createLecture } from '../../helpers/public
 import { createActiveEnrollment } from '../../helpers/studentFixtures.js';
 import { createVerifiedUser, uniqueEmail, DEFAULT_TEST_PASSWORD } from '../../helpers/testUsers.js';
 import { loginNewDeviceAndReverify } from '../../helpers/loginFlow.js';
+import { createAdminSession } from '../../helpers/adminSession.js';
 
 const { sequelize } = db;
 
@@ -78,12 +79,10 @@ describe('POST /api/v1/student/lectures/:id/complete', () => {
   });
 
   test('wrong role (admin) -> 403 FORBIDDEN — this route is student-only', async () => {
-    const email = uniqueEmail('complete-adminrole');
-    await createVerifiedUser({ email, role: 'admin' });
     const course = await createCourse({ isPublished: true });
     const section = await createSection(course);
     const lecture = await createLecture(course, section);
-    const { agent } = await loginNewDeviceAndReverify(app, { email, password: DEFAULT_TEST_PASSWORD, userAgent: 'jest-complete-adminrole' });
+    const { agent } = await createAdminSession(app);
 
     const res = await agent.post(`/api/v1/student/lectures/${lecture.id}/complete`);
 
