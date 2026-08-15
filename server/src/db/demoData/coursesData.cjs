@@ -1,7 +1,8 @@
 'use strict';
 
 // server/src/db/demoData/coursesData.cjs
-// Abundant curriculum for SAMS Academy across NRE1, NRE2, FCPS1, and FCPS2.
+// Abundant curriculum for SAMS Academy across supported EXAM_CATEGORIES:
+// ['NRE1', 'USMLE1', 'USMLE2CK', 'SMLE', 'DHA', 'PROMETRIC', 'MBBS', 'OTHER']
 
 const COURSES = [
   {
@@ -46,12 +47,12 @@ const COURSES = [
     ],
   },
   {
-    title: 'NRE Step 2 Clinical Skills & OSCE Masterclass',
-    slug: 'nre-step-2-clinical-skills',
-    exam_category: 'NRE2',
+    title: 'USMLE Step 2 CK & Clinical OSCE Masterclass',
+    slug: 'usmle-step-2-ck-clinical-skills',
+    exam_category: 'USMLE2CK',
     short_description: 'Comprehensive clinical knowledge, diagnostic decision-making, patient management, and OSCE examination station simulations.',
     description:
-      'Prepare effectively for the NRE Step 2 clinical exam. This course bridges textbook medicine and bedside clinical management with focused modules on Internal Medicine, Surgery, Pediatrics, Gyn/Obs, and high-scoring OSCE protocols.',
+      'Prepare effectively for clinical licensing exams. This course bridges textbook medicine and bedside clinical management with focused modules on Internal Medicine, Surgery, Pediatrics, Gyn/Obs, and high-scoring OSCE protocols.',
     thumbnail_url: null,
     price: 18000.0,
     currency: 'PKR',
@@ -86,12 +87,12 @@ const COURSES = [
     ],
   },
   {
-    title: 'FCPS Part 1 Basic Medical Sciences Immersion',
-    slug: 'fcps-part-1-basic-sciences',
-    exam_category: 'FCPS1',
-    short_description: 'Intensive preparation for CPSP FCPS Part 1 across all subspecialties covering Anatomy, Physiology, Pathology, and Pharmacology.',
+    title: 'USMLE Step 1 Basic Medical Sciences Immersion',
+    slug: 'usmle-step-1-basic-sciences',
+    exam_category: 'USMLE1',
+    short_description: 'Intensive preparation for USMLE Step 1 across all subspecialties covering Anatomy, Physiology, Pathology, and Pharmacology.',
     description:
-      'Designed specifically for FCPS Part 1 aspirants. Deep-dive into high-yield basic sciences questions, systemic pathology concepts, clinical embryology, and neuroanatomy with full 365-day access and CPSP-pattern QBank.',
+      'Deep-dive into high-yield basic sciences questions, systemic pathology concepts, clinical embryology, and neuroanatomy with full 365-day access and exam-pattern QBank.',
     thumbnail_url: null,
     price: 20000.0,
     currency: 'PKR',
@@ -127,12 +128,12 @@ const COURSES = [
     ],
   },
   {
-    title: 'FCPS Part 2 Clinical Medicine & Case Scenarios',
-    slug: 'fcps-part-2-clinical-medicine',
-    exam_category: 'FCPS2',
-    short_description: 'Advanced clinical decision making, multi-system pathology cases, and evidence-based medicine for senior residents.',
+    title: 'SMLE & Prometric Clinical Medicine Review',
+    slug: 'smle-prometric-clinical-medicine',
+    exam_category: 'SMLE',
+    short_description: 'Targeted licensing exam preparation for SMLE, DHA, and Prometric medical board certifications.',
     description:
-      'Tailored for FCPS Part 2 / IMM candidates. Focuses on advanced diagnostic dilemma cases, therapeutic controversies, intensive care unit protocols, and clinical scenario simulations.',
+      'Tailored for candidates preparing for Gulf medical licensing exams (SMLE, DHA, MOH). Focuses on high-yield clinical decision making, common regional diseases, and high-frequency Prometric MCQs.',
     thumbnail_url: null,
     price: 22000.0,
     currency: 'PKR',

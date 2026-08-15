@@ -155,7 +155,7 @@ function generateStudentActivity({ userIds, courseIds, questions, options, sessi
     testSessions.push({
       session_index: s,
       user_id: primaryUserId,
-      mode: s % 2 === 0 ? 'practice' : 'timed',
+      mode: s % 2 === 0 ? 'practice' : 'exam',
       mock_exam_id: null,
       exam_category: 'NRE1',
       filters: JSON.stringify({ subjectIds: [], systemIds: [], difficulty: null, pool: 'all' }),

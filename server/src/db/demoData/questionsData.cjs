@@ -1,7 +1,7 @@
 'use strict';
 
 // server/src/db/demoData/questionsData.cjs
-// Generates 500+ realistic medical MCQs distributed across all categories, subjects, and systems.
+// Generates 500+ realistic medical MCQs distributed across all valid DB categories, subjects, and systems.
 
 function mulberry32(seed) {
   let s = seed;
@@ -14,7 +14,7 @@ function mulberry32(seed) {
   };
 }
 
-const CATEGORIES = ['NRE1', 'NRE2', 'FCPS1', 'FCPS2'];
+const CATEGORIES = ['NRE1', 'USMLE1', 'USMLE2CK', 'SMLE', 'DHA', 'PROMETRIC', 'MBBS', 'OTHER'];
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
 
 const CLINICAL_VIGNETTES = [
@@ -77,12 +77,17 @@ function generateQuestions(subjects, systems, totalCount = 500) {
   const ages = [23, 34, 45, 52, 61, 73];
   const genders = ['male', 'female'];
 
-  // Distribution: NRE1 (40%), NRE2 (20%), FCPS1 (20%), FCPS2 (20%)
+  // Heavy weighting on NRE1, USMLE1, USMLE2CK, SMLE while populating all categories
   for (let i = 0; i < totalCount; i += 1) {
     let category = 'NRE1';
-    if (i >= totalCount * 0.8) category = 'FCPS2';
-    else if (i >= totalCount * 0.6) category = 'FCPS1';
-    else if (i >= totalCount * 0.4) category = 'NRE2';
+    if (i >= totalCount * 0.75) {
+      const remainingCats = ['SMLE', 'DHA', 'PROMETRIC', 'MBBS', 'OTHER'];
+      category = remainingCats[i % remainingCats.length];
+    } else if (i >= totalCount * 0.5) {
+      category = 'USMLE2CK';
+    } else if (i >= totalCount * 0.3) {
+      category = 'USMLE1';
+    }
 
     const subject = subjects[i % subjects.length];
     const system = systems[i % systems.length];
@@ -128,5 +133,6 @@ function generateQuestions(subjects, systems, totalCount = 500) {
 }
 
 module.exports = {
+  CATEGORIES,
   generateQuestions,
 };

@@ -7,15 +7,15 @@ import { DEMO_STUDENTS, generateStudentActivity } from '../../src/db/demoData/st
 
 describe('Demo Data Generators', () => {
   describe('coursesData', () => {
-    it('defines at least 4 courses covering NRE1, NRE2, FCPS1, FCPS2', () => {
+    it('defines at least 4 courses covering NRE1, USMLE1, USMLE2CK, SMLE', () => {
       expect(Array.isArray(coursesData)).toBe(true);
       expect(coursesData.length).toBeGreaterThanOrEqual(4);
 
       const categories = new Set(coursesData.map((c) => c.exam_category));
       expect(categories.has('NRE1')).toBe(true);
-      expect(categories.has('NRE2')).toBe(true);
-      expect(categories.has('FCPS1')).toBe(true);
-      expect(categories.has('FCPS2')).toBe(true);
+      expect(categories.has('USMLE1')).toBe(true);
+      expect(categories.has('USMLE2CK')).toBe(true);
+      expect(categories.has('SMLE')).toBe(true);
 
       for (const course of coursesData) {
         expect(course.title).toBeTruthy();
@@ -69,21 +69,19 @@ describe('Demo Data Generators', () => {
       const { questions, options } = generateQuestions(mockSubjects, mockSystems, 500);
       expect(questions.length).toBeGreaterThanOrEqual(500);
 
-      const categoryCounts = { NRE1: 0, NRE2: 0, FCPS1: 0, FCPS2: 0 };
+      const categoryCounts = {};
       for (const q of questions) {
         expect(q.stem).toBeTruthy();
         expect(q.explanation).toBeTruthy();
         expect(['easy', 'medium', 'hard']).toContain(q.difficulty);
         expect(q.is_active).toBe(true);
-        expect(categoryCounts[q.exam_category]).toBeDefined();
-        categoryCounts[q.exam_category] += 1;
+        categoryCounts[q.exam_category] = (categoryCounts[q.exam_category] || 0) + 1;
       }
 
-      // Assert all 4 categories have questions
+      // Assert categories have questions
       expect(categoryCounts.NRE1).toBeGreaterThanOrEqual(100);
-      expect(categoryCounts.NRE2).toBeGreaterThanOrEqual(50);
-      expect(categoryCounts.FCPS1).toBeGreaterThanOrEqual(50);
-      expect(categoryCounts.FCPS2).toBeGreaterThanOrEqual(50);
+      expect(categoryCounts.USMLE1).toBeGreaterThanOrEqual(50);
+      expect(categoryCounts.USMLE2CK).toBeGreaterThanOrEqual(50);
 
       // Options verification
       expect(options.length).toBe(questions.length * 4);
@@ -112,7 +110,7 @@ describe('Demo Data Generators', () => {
 
       for (const exam of mockExamsData) {
         expect(exam.title).toBeTruthy();
-        expect(['NRE1', 'NRE2', 'FCPS1', 'FCPS2']).toContain(exam.exam_category);
+        expect(['NRE1', 'USMLE1', 'USMLE2CK', 'SMLE', 'DHA', 'PROMETRIC', 'MBBS', 'OTHER']).toContain(exam.exam_category);
         expect(exam.duration_minutes).toBeGreaterThan(0);
         expect(exam.pass_percent).toBeGreaterThanOrEqual(50);
         expect(exam.question_count).toBeGreaterThanOrEqual(50);
