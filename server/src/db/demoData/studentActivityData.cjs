@@ -66,8 +66,8 @@ function generateStudentActivity({ userIds, courseIds, questions, options, sessi
   // 1. Enrollments: enroll students into courses
   const enrollments = [];
   userIds.forEach((userId, uIdx) => {
-    // Primary demo student enrolled in multiple courses; others enrolled in 1-2
-    const coursesToEnroll = uIdx === 0 ? courseIds : [courseIds[uIdx % courseIds.length]];
+    // Primary student enrolled in first 2 courses; second student in 3rd course; 4th course un-enrolled
+    const coursesToEnroll = uIdx === 0 ? courseIds.slice(0, 2) : uIdx === 1 ? courseIds.slice(2, 3) : [];
     coursesToEnroll.forEach((courseId) => {
       enrollments.push({
         user_id: userId,
