@@ -1,62 +1,68 @@
 'use strict';
 
-const MOCK_EXAM_TITLE = 'NRE Step 1 Mock Exam 1';
+// server/src/db/seeders/20260101010004-seed-05-mock-exam.cjs
+// Synchronized mock exams seeder.
+
+const mockExamsData = require('../demoData/mockExamsData.cjs');
 
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
-    if (process.env.SEED_MODE === 'prod') {
-      console.log('[seed:mock-exam] skipped — SEED_MODE=prod (demo-only content).');
-      return;
-    }
-
     const now = new Date();
+    let insertedCount = 0;
 
-    const [existing] = await queryInterface.sequelize.query(
-      'SELECT id FROM mock_exams WHERE title = :title',
-      { replacements: { title: MOCK_EXAM_TITLE } }
-    );
-    if (existing.length > 0) {
-      console.log('[seed:mock-exam] mock exam already present, skipping.');
-      return;
+    for (const examDef of mockExamsData) {
+      const [existing] = await queryInterface.sequelize.query(
+        'SELECT id FROM mock_exams WHERE title = :title',
+        { replacements: { title: examDef.title } }
+      );
+      if (existing.length > 0) continue;
+
+      await queryInterface.bulkInsert('mock_exams', [
+        {
+          title: examDef.title,
+          exam_category: examDef.exam_category,
+          duration_minutes: examDef.duration_minutes,
+          pass_percent: examDef.pass_percent,
+          is_published: examDef.is_published,
+          created_at: now,
+          updated_at: now,
+        },
+      ]);
+
+      const [[examRow]] = await queryInterface.sequelize.query(
+        'SELECT id FROM mock_exams WHERE title = :title',
+        { replacements: { title: examDef.title } }
+      );
+      const mockExamId = examRow.id;
+
+      const [categoryQuestions] = await queryInterface.sequelize.query(
+        'SELECT id FROM questions WHERE exam_category = :cat AND is_active = 1 ORDER BY id ASC LIMIT :n',
+        { replacements: { cat: examDef.exam_category, n: examDef.question_count } }
+      );
+
+      const questionsToMap = categoryQuestions.length > 0
+        ? categoryQuestions
+        : (await queryInterface.sequelize.query('SELECT id FROM questions WHERE is_active = 1 ORDER BY id ASC LIMIT :n', {
+            replacements: { n: examDef.question_count },
+          }))[0];
+
+      if (questionsToMap.length > 0) {
+        const meqRows = questionsToMap.map((q, idx) => ({
+          mock_exam_id: mockExamId,
+          question_id: q.id,
+          sort_order: idx,
+        }));
+        await queryInterface.bulkInsert('mock_exam_questions', meqRows);
+      }
+      insertedCount += 1;
     }
 
-    const [questions] = await queryInterface.sequelize.query(
-      "SELECT id FROM questions WHERE exam_category = 'NRE1' ORDER BY id ASC LIMIT 50"
-    );
-    if (questions.length < 50) {
-      throw new Error('[seed:mock-exam] fewer than 50 seeded questions available; run the questions seeder first.');
-    }
-
-    await queryInterface.bulkInsert('mock_exams', [
-      {
-        title: MOCK_EXAM_TITLE,
-        exam_category: 'NRE1',
-        duration_minutes: 60,
-        pass_percent: 60.0,
-        is_published: true,
-        created_at: now,
-        updated_at: now,
-      },
-    ]);
-
-    const [[{ id: mockExamId }]] = await queryInterface.sequelize.query(
-      'SELECT id FROM mock_exams WHERE title = :title',
-      { replacements: { title: MOCK_EXAM_TITLE } }
-    );
-
-    const meqRows = questions.map((q, idx) => ({
-      mock_exam_id: mockExamId,
-      question_id: q.id,
-      sort_order: idx,
-    }));
-    await queryInterface.bulkInsert('mock_exam_questions', meqRows);
-
-    console.log(`[seed:mock-exam] inserted 1 mock exam with ${meqRows.length} questions.`);
+    console.log(`[seed:mock-exam] inserted ${insertedCount} mock exam(s).`);
   },
 
   async down(queryInterface) {
-    // mock_exam_questions cascade-delete via FK when the mock exam is removed.
-    await queryInterface.bulkDelete('mock_exams', { title: MOCK_EXAM_TITLE });
+    const examTitles = mockExamsData.map((m) => m.title);
+    await queryInterface.bulkDelete('mock_exams', { title: examTitles });
   },
 };

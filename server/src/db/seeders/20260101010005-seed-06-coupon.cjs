@@ -1,43 +1,45 @@
 'use strict';
 
-const COUPON_CODE = 'WELCOME10';
+// server/src/db/seeders/20260101010005-seed-06-coupon.cjs
+// Synchronized coupons seeder.
+
+const siteContentData = require('../demoData/siteContentData.cjs');
 
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
-    if (process.env.SEED_MODE === 'prod') {
-      console.log('[seed:coupon] skipped — SEED_MODE=prod (demo-only content).');
-      return;
-    }
-
     const now = new Date();
-    const [existing] = await queryInterface.sequelize.query('SELECT id FROM coupons WHERE code = :code', {
-      replacements: { code: COUPON_CODE },
-    });
-    if (existing.length > 0) {
-      console.log('[seed:coupon] WELCOME10 already present, skipping.');
-      return;
+    let insertedCount = 0;
+
+    for (const c of siteContentData.coupons) {
+      const [existing] = await queryInterface.sequelize.query('SELECT id FROM coupons WHERE code = :code', {
+        replacements: { code: c.code },
+      });
+      if (existing.length === 0) {
+        await queryInterface.bulkInsert('coupons', [
+          {
+            code: c.code,
+            type: c.type,
+            value: c.value,
+            course_id: c.course_id,
+            max_uses: c.max_uses,
+            used_count: c.used_count || 0,
+            valid_from: null,
+            valid_until: null,
+            is_active: c.is_active,
+            created_at: now,
+            updated_at: now,
+          },
+        ]);
+        insertedCount += 1;
+      }
     }
 
-    await queryInterface.bulkInsert('coupons', [
-      {
-        code: COUPON_CODE,
-        type: 'percent',
-        value: 10.0,
-        course_id: null,
-        max_uses: null,
-        used_count: 0,
-        valid_from: null,
-        valid_until: null,
-        is_active: true,
-        created_at: now,
-        updated_at: now,
-      },
-    ]);
-    console.log('[seed:coupon] inserted WELCOME10 coupon.');
+    console.log(`[seed:coupon] inserted ${insertedCount} coupon(s).`);
   },
 
   async down(queryInterface) {
-    await queryInterface.bulkDelete('coupons', { code: COUPON_CODE });
+    const couponCodes = siteContentData.coupons.map((c) => c.code);
+    await queryInterface.bulkDelete('coupons', { code: couponCodes });
   },
 };

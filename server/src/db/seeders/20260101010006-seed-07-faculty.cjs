@@ -1,53 +1,42 @@
 'use strict';
 
-const FACULTY = [
-  {
-    name: 'Dr. Ayesha Raza',
-    title: 'MBBS, FCPS (Internal Medicine)',
-    bio: 'Dr. Ayesha has over 10 years of experience teaching internal medicine to NRE and USMLE candidates, with a focus on high-yield clinical reasoning.',
-  },
-  {
-    name: 'Dr. Bilal Ahmed',
-    title: 'MBBS, MRCP (UK)',
-    bio: 'Dr. Bilal specializes in cardiovascular and respiratory medicine and has authored practice questions for multiple licensing-exam prep programs.',
-  },
-  {
-    name: 'Dr. Sana Khalid',
-    title: 'MBBS, MPhil (Pharmacology)',
-    bio: 'Dr. Sana leads pharmacology and biochemistry content development, translating dense basic-science material into exam-focused lessons.',
-  },
-];
+// server/src/db/seeders/20260101010006-seed-07-faculty.cjs
+// Synchronized faculty seeder.
+
+const siteContentData = require('../demoData/siteContentData.cjs');
 
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
-    if (process.env.SEED_MODE === 'prod') {
-      console.log('[seed:faculty] skipped — SEED_MODE=prod (demo-only placeholder bios).');
-      return;
-    }
-
     const now = new Date();
-    const [[{ cnt }]] = await queryInterface.sequelize.query('SELECT COUNT(*) AS cnt FROM faculty');
-    if (Number(cnt) >= FACULTY.length) {
-      console.log('[seed:faculty] faculty already present, skipping.');
-      return;
+    let insertedCount = 0;
+
+    for (const f of siteContentData.faculty) {
+      const [existing] = await queryInterface.sequelize.query('SELECT id FROM faculty WHERE name = :name', {
+        replacements: { name: f.name },
+      });
+      if (existing.length === 0) {
+        await queryInterface.bulkInsert('faculty', [
+          {
+            name: f.name,
+            title: f.title,
+            bio: f.bio,
+            photo_url: f.photo_url,
+            sort_order: f.sort_order,
+            is_active: f.is_active,
+            created_at: now,
+            updated_at: now,
+          },
+        ]);
+        insertedCount += 1;
+      }
     }
 
-    const rows = FACULTY.map((f, idx) => ({
-      name: f.name,
-      title: f.title,
-      bio: f.bio,
-      photo_url: null,
-      sort_order: idx,
-      is_active: true,
-      created_at: now,
-      updated_at: now,
-    }));
-    await queryInterface.bulkInsert('faculty', rows);
-    console.log(`[seed:faculty] inserted ${rows.length} faculty member(s).`);
+    console.log(`[seed:faculty] inserted ${insertedCount} faculty member(s).`);
   },
 
   async down(queryInterface) {
-    await queryInterface.bulkDelete('faculty', { name: FACULTY.map((f) => f.name) });
+    const facultyNames = siteContentData.faculty.map((f) => f.name);
+    await queryInterface.bulkDelete('faculty', { name: facultyNames });
   },
 };

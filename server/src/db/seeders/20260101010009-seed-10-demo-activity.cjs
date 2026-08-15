@@ -1,253 +1,151 @@
 'use strict';
 
-// Deterministic PRNG (mulberry32) — same technique as the questions seeder,
-// different seed constant so the two don't produce correlated sequences.
-function mulberry32(seed) {
-  let s = seed;
-  return function rand() {
-    s |= 0;
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// server/src/db/seeders/20260101010009-seed-10-demo-activity.cjs
+// Synchronized demo student activity & analytics seeder.
 
-const DEMO_EMAIL = 'student@samsacademy.com';
-const COURSE_SLUG = 'nre-step-1-complete-course';
-const SESSION_COUNT = 5;
-const QUESTIONS_PER_SESSION = 10;
-
-function shuffle(arr, rand) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rand() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function addDays(date, days) {
-  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
-}
-function toDateOnly(d) {
-  return d.toISOString().slice(0, 10);
-}
+const coursesData = require('../demoData/coursesData.cjs');
+const { DEMO_STUDENTS, generateStudentActivity } = require('../demoData/studentActivityData.cjs');
 
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
-    if (process.env.SEED_MODE === 'prod') {
-      console.log('[seed:demo-activity] skipped — SEED_MODE=prod (demo-only content).');
-      return;
-    }
-
     const now = new Date();
+    const studentEmails = DEMO_STUDENTS.map((s) => s.email);
+    const courseSlugs = coursesData.map((c) => c.slug);
 
-    const [[user]] = await queryInterface.sequelize.query('SELECT id FROM users WHERE email = :email', {
-      replacements: { email: DEMO_EMAIL },
-    });
-    const [[course]] = await queryInterface.sequelize.query(
-      'SELECT id, validity_days FROM courses WHERE slug = :slug',
-      { replacements: { slug: COURSE_SLUG } }
+    const [dbStudents] = await queryInterface.sequelize.query(
+      'SELECT id, email FROM users WHERE email IN (:emails) ORDER BY id ASC',
+      { replacements: { emails: studentEmails } }
     );
-    if (!user || !course) {
-      throw new Error('[seed:demo-activity] demo student or seeded course not found; run earlier seeders first.');
-    }
+    const [dbCourses] = await queryInterface.sequelize.query(
+      'SELECT id, slug FROM courses WHERE slug IN (:slugs) ORDER BY id ASC',
+      { replacements: { slugs: courseSlugs } }
+    );
 
-    const [existingEnrollment] = await queryInterface.sequelize.query(
-      "SELECT id FROM enrollments WHERE user_id = :userId AND course_id = :courseId AND status = 'active'",
-      { replacements: { userId: user.id, courseId: course.id } }
-    );
-    if (existingEnrollment.length > 0) {
-      console.log('[seed:demo-activity] demo enrollment already present, skipping.');
+    if (dbStudents.length === 0 || dbCourses.length === 0) {
+      console.log('[seed:demo-activity] demo students or courses not found, skipping activity.');
       return;
     }
 
-    await queryInterface.bulkInsert('enrollments', [
-      {
-        user_id: user.id,
-        course_id: course.id,
-        order_id: null,
-        source: 'manual',
-        starts_at: now,
-        expires_at: addDays(now, course.validity_days),
-        status: 'active',
-        created_at: now,
-        updated_at: now,
-      },
-    ]);
-    console.log('[seed:demo-activity] inserted demo enrollment.');
+    const studentIds = dbStudents.map((s) => s.id);
+    const courseIds = dbCourses.map((c) => c.id);
 
-    const [questions] = await queryInterface.sequelize.query(
-      "SELECT id FROM questions WHERE exam_category = 'NRE1' ORDER BY id ASC"
+    const [allQuestions] = await queryInterface.sequelize.query(
+      'SELECT id, exam_category FROM questions ORDER BY id ASC LIMIT 200'
     );
-    if (questions.length < QUESTIONS_PER_SESSION) {
-      console.log('[seed:demo-activity] not enough seeded questions for demo test sessions, skipping test data.');
-      return;
-    }
-    const [options] = await queryInterface.sequelize.query(
+    const [allOptions] = await queryInterface.sequelize.query(
       'SELECT id, question_id, is_correct FROM question_options'
     );
-    const optionsByQuestion = new Map();
-    for (const opt of options) {
-      if (!optionsByQuestion.has(opt.question_id)) optionsByQuestion.set(opt.question_id, []);
-      optionsByQuestion.get(opt.question_id).push(opt);
-    }
 
-    const rand = mulberry32(987654321);
-    const historyMap = new Map(); // questionId -> { timesSeen, timesCorrect, lastResult, lastSeenAt }
-    const dailyMap = new Map(); // 'YYYY-MM-DD' -> { attempted, correct, qbankSeconds }
+    const activity = generateStudentActivity({
+      userIds: studentIds,
+      courseIds,
+      questions: allQuestions,
+      options: allOptions,
+    });
 
-    for (let s = 0; s < SESSION_COUNT; s += 1) {
-      const daysAgo = SESSION_COUNT - s; // oldest session first (5 days ago .. 1 day ago)
-      const startedAt = addDays(now, -daysAgo);
-      const sessionQuestions = shuffle(questions, rand).slice(0, QUESTIONS_PER_SESSION);
-
-      let correctCount = 0;
-      let incorrectCount = 0;
-      let skippedCount = 0;
-      let totalTimeSpent = 0;
-      const attemptRows = [];
-
-      sessionQuestions.forEach((q, idx) => {
-        const opts = optionsByQuestion.get(q.id) || [];
-        const correctOpt = opts.find((o) => Boolean(o.is_correct));
-        const wrongOpts = opts.filter((o) => !o.is_correct);
-        const roll = rand();
-
-        let selectedOptionId = null;
-        let isCorrect = null;
-        let answeredAt = null;
-        const timeSpent = 20 + Math.floor(rand() * 70);
-
-        if (roll < 0.7 && correctOpt) {
-          selectedOptionId = correctOpt.id;
-          isCorrect = true;
-          correctCount += 1;
-          answeredAt = new Date(startedAt.getTime() + (idx + 1) * 60 * 1000);
-          totalTimeSpent += timeSpent;
-        } else if (roll < 0.9 && wrongOpts.length > 0) {
-          selectedOptionId = wrongOpts[Math.floor(rand() * wrongOpts.length)].id;
-          isCorrect = false;
-          incorrectCount += 1;
-          answeredAt = new Date(startedAt.getTime() + (idx + 1) * 60 * 1000);
-          totalTimeSpent += timeSpent;
-        } else {
-          skippedCount += 1;
-        }
-
-        attemptRows.push({
-          question_id: q.id,
-          sort_order: idx,
-          selected_option_id: selectedOptionId,
-          is_correct: isCorrect,
-          is_flagged: rand() < 0.15,
-          time_spent_seconds: selectedOptionId ? timeSpent : 0,
-          answered_at: answeredAt,
-        });
-
-        const result = isCorrect === true ? 'correct' : isCorrect === false ? 'incorrect' : 'skipped';
-        const prev = historyMap.get(q.id) || { timesSeen: 0, timesCorrect: 0 };
-        historyMap.set(q.id, {
-          timesSeen: prev.timesSeen + 1,
-          timesCorrect: prev.timesCorrect + (isCorrect === true ? 1 : 0),
-          lastResult: result,
-          lastSeenAt: answeredAt || startedAt,
-        });
-      });
-
-      const completedAt = new Date(startedAt.getTime() + QUESTIONS_PER_SESSION * 60 * 1000);
-      const scorePercent = Number(((correctCount / QUESTIONS_PER_SESSION) * 100).toFixed(2));
-
-      await queryInterface.bulkInsert('test_sessions', [
-        {
-          user_id: user.id,
-          mode: 'practice',
-          mock_exam_id: null,
-          exam_category: 'NRE1',
-          filters: JSON.stringify({ subjectIds: [], systemIds: [], difficulty: null, pool: 'all' }),
-          question_count: QUESTIONS_PER_SESSION,
-          time_limit_seconds: null,
-          status: 'completed',
-          started_at: startedAt,
-          completed_at: completedAt,
-          correct_count: correctCount,
-          incorrect_count: incorrectCount,
-          skipped_count: skippedCount,
-          score_percent: scorePercent,
-          passed: null,
-          created_at: startedAt,
-          updated_at: completedAt,
-        },
-      ]);
-
-      // NOTE: match by ORDER BY id DESC rather than started_at, since MySQL's
-      // DATETIME column truncates the JS Date's milliseconds on write, so an
-      // exact-value WHERE match against the original in-memory Date fails.
-      const [[{ id: sessionId }]] = await queryInterface.sequelize.query(
-        'SELECT id FROM test_sessions WHERE user_id = :userId ORDER BY id DESC LIMIT 1',
-        { replacements: { userId: user.id } }
+    // Enrollments
+    for (const enr of activity.enrollments) {
+      const [existingEnr] = await queryInterface.sequelize.query(
+        "SELECT id FROM enrollments WHERE user_id = :uid AND course_id = :cid AND status = 'active'",
+        { replacements: { uid: enr.user_id, cid: enr.course_id } }
       );
-
-      await queryInterface.bulkInsert(
-        'test_attempt_questions',
-        attemptRows.map((r) => ({ ...r, test_session_id: sessionId }))
-      );
-
-      const dateKey = toDateOnly(completedAt);
-      const prevDaily = dailyMap.get(dateKey) || { attempted: 0, correct: 0, qbankSeconds: 0 };
-      dailyMap.set(dateKey, {
-        attempted: prevDaily.attempted + correctCount + incorrectCount,
-        correct: prevDaily.correct + correctCount,
-        qbankSeconds: prevDaily.qbankSeconds + totalTimeSpent,
-      });
+      if (existingEnr.length === 0) {
+        await queryInterface.bulkInsert('enrollments', [
+          {
+            user_id: enr.user_id,
+            course_id: enr.course_id,
+            order_id: null,
+            source: enr.source,
+            starts_at: enr.starts_at,
+            expires_at: enr.expires_at,
+            status: enr.status,
+            created_at: now,
+            updated_at: now,
+          },
+        ]);
+      }
     }
 
-    const historyRows = Array.from(historyMap.entries()).map(([questionId, h]) => ({
-      user_id: user.id,
-      question_id: questionId,
-      times_seen: h.timesSeen,
-      times_correct: h.timesCorrect,
-      last_result: h.lastResult,
-      last_seen_at: h.lastSeenAt,
-    }));
-    if (historyRows.length > 0) {
-      await queryInterface.bulkInsert('user_question_history', historyRows);
-    }
-
-    const dailyRows = Array.from(dailyMap.entries()).map(([dateKey, d]) => ({
-      user_id: user.id,
-      stat_date: dateKey,
-      questions_attempted: d.attempted,
-      questions_correct: d.correct,
-      qbank_seconds: d.qbankSeconds,
-      video_seconds: 0,
-    }));
-    if (dailyRows.length > 0) {
-      await queryInterface.bulkInsert('user_daily_stats', dailyRows);
-    }
-
-    console.log(
-      `[seed:demo-activity] inserted ${SESSION_COUNT} test sessions, ${historyRows.length} history rows, ${dailyRows.length} daily-stat rows.`
+    // Sessions
+    const primaryStudentId = studentIds[0];
+    const [[{ sessionCount }]] = await queryInterface.sequelize.query(
+      'SELECT COUNT(*) AS sessionCount FROM test_sessions WHERE user_id = :uid',
+      { replacements: { uid: primaryStudentId } }
     );
+
+    if (Number(sessionCount) === 0 && activity.testSessions.length > 0) {
+      for (const session of activity.testSessions) {
+        await queryInterface.bulkInsert('test_sessions', [
+          {
+            user_id: session.user_id,
+            mode: session.mode,
+            mock_exam_id: session.mock_exam_id,
+            exam_category: session.exam_category,
+            filters: session.filters,
+            question_count: session.question_count,
+            time_limit_seconds: session.time_limit_seconds,
+            status: session.status,
+            started_at: session.started_at,
+            completed_at: session.completed_at,
+            correct_count: session.correct_count,
+            incorrect_count: session.incorrect_count,
+            skipped_count: session.skipped_count,
+            score_percent: session.score_percent,
+            passed: session.passed,
+            created_at: session.started_at,
+            updated_at: session.completed_at,
+          },
+        ]);
+
+        const [[sessionRow]] = await queryInterface.sequelize.query(
+          'SELECT id FROM test_sessions WHERE user_id = :uid ORDER BY id DESC LIMIT 1',
+          { replacements: { uid: session.user_id } }
+        );
+        const sessionId = sessionRow.id;
+
+        const sessionAttempts = activity.attemptQuestions
+          .filter((a) => a.session_index === session.session_index)
+          .map((a) => ({
+            test_session_id: sessionId,
+            question_id: a.question_id,
+            sort_order: a.sort_order,
+            selected_option_id: a.selected_option_id,
+            is_correct: a.is_correct,
+            is_flagged: a.is_flagged,
+            time_spent_seconds: a.time_spent_seconds,
+            answered_at: a.answered_at,
+          }));
+
+        if (sessionAttempts.length > 0) {
+          await queryInterface.bulkInsert('test_attempt_questions', sessionAttempts);
+        }
+      }
+
+      if (activity.historyRows.length > 0) {
+        await queryInterface.bulkInsert('user_question_history', activity.historyRows);
+      }
+
+      if (activity.dailyStatsRows.length > 0) {
+        await queryInterface.bulkInsert('user_daily_stats', activity.dailyStatsRows);
+      }
+    }
+
+    console.log('[seed:demo-activity] synchronized demo student activity.');
   },
 
   async down(queryInterface) {
-    const [[user]] = await queryInterface.sequelize.query('SELECT id FROM users WHERE email = :email', {
-      replacements: { email: DEMO_EMAIL },
-    });
-    const [[course]] = await queryInterface.sequelize.query('SELECT id FROM courses WHERE slug = :slug', {
-      replacements: { slug: COURSE_SLUG },
-    });
-    if (!user) return;
+    const studentEmails = DEMO_STUDENTS.map((s) => s.email);
+    const [dbStudents] = await queryInterface.sequelize.query(
+      'SELECT id FROM users WHERE email IN (:emails)',
+      { replacements: { emails: studentEmails } }
+    );
+    const studentIds = dbStudents.map((s) => s.id);
+    if (studentIds.length === 0) return;
 
-    // test_attempt_questions cascade-delete via FK when their test_session is removed.
-    await queryInterface.bulkDelete('test_sessions', { user_id: user.id, mode: 'practice' });
-    await queryInterface.bulkDelete('user_question_history', { user_id: user.id });
-    await queryInterface.bulkDelete('user_daily_stats', { user_id: user.id });
-    if (course) {
-      await queryInterface.bulkDelete('enrollments', { user_id: user.id, course_id: course.id, source: 'manual' });
-    }
+    await queryInterface.bulkDelete('test_sessions', { user_id: studentIds });
+    await queryInterface.bulkDelete('user_question_history', { user_id: studentIds });
+    await queryInterface.bulkDelete('user_daily_stats', { user_id: studentIds });
+    await queryInterface.bulkDelete('enrollments', { user_id: studentIds });
   },
 };

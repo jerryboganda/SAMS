@@ -1,54 +1,19 @@
 'use strict';
 
-// Deterministic PRNG (mulberry32) so a fresh-DB seed run is reproducible.
-function mulberry32(seed) {
-  let s = seed;
-  return function rand() {
-    s |= 0;
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// server/src/db/seeders/20260101010003-seed-04-questions.cjs
+// Synchronized question bank seeder (500+ questions across all categories).
 
-const DIFFICULTIES = ['easy', 'medium', 'hard'];
-const QUESTION_COUNT = 200;
+const { generateQuestions } = require('../demoData/questionsData.cjs');
 
-const OPENERS = [
-  (subject, system) =>
-    `A 34-year-old patient presents with clinical findings suggestive of a disorder involving the ${system} system.`,
-  (subject, system) =>
-    `A 58-year-old patient's routine work-up reveals an abnormality most consistent with a ${system} system condition.`,
-  (subject, system) => `A medical student is asked to explain the ${subject} basis of a classic ${system} system finding.`,
-  (subject, system) => `During ward rounds, a case of a ${system} system disorder prompts a question about its ${subject} mechanism.`,
-  (subject, system) => `A 45-year-old patient with a history of a ${system} system condition undergoes further evaluation.`,
-];
-
-function buildOptionPool(subject, system) {
-  const s = subject.toLowerCase();
-  const y = system.toLowerCase();
-  return [
-    `Increased ${y} system vascular resistance secondary to altered ${s} regulation`,
-    `Impaired ${s} enzyme or receptor function affecting the ${y} system`,
-    `A compensatory ${y} system response driven by abnormal ${s} signaling`,
-    `Disrupted ${s} feedback control leading to ${y} system dysfunction`,
-  ];
-}
+const TARGET_QUESTION_COUNT = 500;
 
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
-    if (process.env.SEED_MODE === 'prod') {
-      console.log('[seed:questions] skipped — SEED_MODE=prod (demo-only content).');
-      return;
-    }
-
     const now = new Date();
-
     const [[{ cnt }]] = await queryInterface.sequelize.query('SELECT COUNT(*) AS cnt FROM questions');
-    if (Number(cnt) >= QUESTION_COUNT) {
-      console.log(`[seed:questions] ${cnt} questions already present (>= ${QUESTION_COUNT}), skipping.`);
+    if (Number(cnt) >= TARGET_QUESTION_COUNT) {
+      console.log(`[seed:questions] ${cnt} questions already present (>= ${TARGET_QUESTION_COUNT}), skipping.`);
       return;
     }
 
@@ -58,66 +23,56 @@ module.exports = {
       throw new Error('[seed:questions] subjects/body_systems must be seeded first.');
     }
 
-    const rand = mulberry32(20260101);
-    const questionRows = [];
-    for (let i = 0; i < QUESTION_COUNT; i += 1) {
-      const subject = subjects[i % subjects.length];
-      const system = systems[i % systems.length];
-      const difficulty = DIFFICULTIES[i % DIFFICULTIES.length];
-      const opener = OPENERS[i % OPENERS.length](subject.name, system.name);
+    const neededCount = TARGET_QUESTION_COUNT - Number(cnt);
+    const { questions, options } = generateQuestions(subjects, systems, neededCount);
 
-      questionRows.push({
-        exam_category: 'NRE1',
-        subject_id: subject.id,
-        system_id: system.id,
-        stem: `${opener} Which of the following best explains the underlying ${subject.name} mechanism most relevant to this presentation? (Case ${i + 1})`,
-        image_url: null,
-        explanation: `This scenario is best explained by core ${subject.name} principles as they apply to the ${system.name} system. Reviewing the underlying pathophysiology clarifies why the correct option accounts for the presentation described, while the remaining options describe plausible but less directly relevant mechanisms.`,
-        reference_text: `${subject.name} — ${system.name} system review.`,
-        difficulty,
-        is_active: true,
-        times_attempted: 0,
-        times_correct: 0,
-        created_at: now,
-        updated_at: now,
-      });
-    }
+    const questionRows = questions.map((q) => ({
+      exam_category: q.exam_category,
+      subject_id: q.subject_id,
+      system_id: q.system_id,
+      stem: q.stem,
+      image_url: q.image_url,
+      explanation: q.explanation,
+      reference_text: q.reference_text,
+      difficulty: q.difficulty,
+      is_active: q.is_active,
+      times_attempted: 0,
+      times_correct: 0,
+      created_at: now,
+      updated_at: now,
+    }));
 
     await queryInterface.bulkInsert('questions', questionRows);
 
-    const [inserted] = await queryInterface.sequelize.query(
-      "SELECT id, subject_id, system_id FROM questions WHERE exam_category = 'NRE1' ORDER BY id DESC LIMIT :n",
-      { replacements: { n: QUESTION_COUNT } }
+    const [insertedQuestions] = await queryInterface.sequelize.query(
+      'SELECT id FROM questions ORDER BY id DESC LIMIT :n',
+      { replacements: { n: questionRows.length } }
     );
-    // rows come back DESC (most recent first) — restore ascending insertion order
-    const insertedAsc = inserted.slice().reverse();
-
-    const subjectById = Object.fromEntries(subjects.map((s) => [s.id, s.name]));
-    const systemById = Object.fromEntries(systems.map((s) => [s.id, s.name]));
+    const insertedQuestionsAsc = insertedQuestions.slice().reverse();
 
     const optionRows = [];
-    insertedAsc.forEach((q, i) => {
-      const pool = buildOptionPool(subjectById[q.subject_id], systemById[q.system_id]);
-      const correctIndex = i % 4;
-      pool.forEach((text, idx) => {
+    insertedQuestionsAsc.forEach((q, idx) => {
+      const questionOpts = options.filter((o) => o.question_index === idx);
+      questionOpts.forEach((opt) => {
         optionRows.push({
           question_id: q.id,
-          option_text: text,
-          is_correct: idx === correctIndex,
-          sort_order: idx,
+          option_text: opt.option_text,
+          is_correct: opt.is_correct,
+          sort_order: opt.sort_order,
           created_at: now,
           updated_at: now,
         });
       });
     });
 
-    await queryInterface.bulkInsert('question_options', optionRows);
+    if (optionRows.length > 0) {
+      await queryInterface.bulkInsert('question_options', optionRows);
+    }
 
     console.log(`[seed:questions] inserted ${questionRows.length} questions and ${optionRows.length} options.`);
   },
 
   async down(queryInterface) {
-    // question_options cascade-delete via FK when their question is removed.
-    await queryInterface.bulkDelete('questions', { exam_category: 'NRE1' });
+    await queryInterface.bulkDelete('questions', null, {});
   },
 };

@@ -1,110 +1,93 @@
 'use strict';
 
-const COURSE_SLUG = 'nre-step-1-complete-course';
+// server/src/db/seeders/20260101010002-seed-03-course.cjs
+// Synchronized course curriculum seeder.
 
-const SECTIONS = [
-  {
-    title: 'Section 1: Basic Sciences Foundations',
-    lectures: [
-      { title: 'Orientation & How to Use the QBank', minutes: 8, freePreview: true },
-      { title: 'High-Yield Anatomy Review', minutes: 22 },
-      { title: 'Core Physiology Concepts', minutes: 25 },
-    ],
-  },
-  {
-    title: 'Section 2: Systemic Pathology Review',
-    lectures: [
-      { title: 'Cardiovascular System Overview', minutes: 30 },
-      { title: 'Respiratory & Renal Systems', minutes: 27 },
-      { title: 'GIT, Endocrine & Neuro Highlights', minutes: 33 },
-    ],
-  },
-];
+const coursesData = require('../demoData/coursesData.cjs');
 
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
-    if (process.env.SEED_MODE === 'prod') {
-      console.log('[seed:course] skipped — SEED_MODE=prod (demo-only content).');
-      return;
-    }
-
     const now = new Date();
-
-    const [existingCourse] = await queryInterface.sequelize.query(
-      'SELECT id FROM courses WHERE slug = :slug',
-      { replacements: { slug: COURSE_SLUG } }
+    const courseSlugs = coursesData.map((c) => c.slug);
+    const [existingCourses] = await queryInterface.sequelize.query(
+      'SELECT id, slug FROM courses WHERE slug IN (:slugs)',
+      { replacements: { slugs: courseSlugs } }
     );
-    if (existingCourse.length > 0) {
-      console.log('[seed:course] course already present, skipping.');
-      return;
-    }
+    const existingSlugs = new Set(existingCourses.map((c) => c.slug));
 
-    await queryInterface.bulkInsert('courses', [
-      {
-        title: 'NRE Step 1 Complete Course',
-        slug: COURSE_SLUG,
-        exam_category: 'NRE1',
-        short_description: 'A complete NRE Step 1 prep course covering basic sciences and systemic pathology.',
-        description:
-          'This course walks through the core basic-science foundations and systemic pathology topics tested ' +
-          'on the NRE Step 1 exam, paired with a full QBank of practice questions and a timed mock exam. ' +
-          'Includes video lectures, lecture bookmarks/progress tracking, and 180 days of access.',
-        thumbnail_url: null,
-        price: 15000.0,
-        currency: 'PKR',
-        validity_days: 180,
-        includes_qbank: true,
-        is_published: true,
-        sort_order: 0,
-        created_at: now,
-        updated_at: now,
-      },
-    ]);
+    let insertedCount = 0;
+    for (let cIdx = 0; cIdx < coursesData.length; cIdx += 1) {
+      const courseDef = coursesData[cIdx];
+      if (existingSlugs.has(courseDef.slug)) continue;
 
-    const [[{ id: courseId }]] = await queryInterface.sequelize.query(
-      'SELECT id FROM courses WHERE slug = :slug',
-      { replacements: { slug: COURSE_SLUG } }
-    );
-
-    for (let sIdx = 0; sIdx < SECTIONS.length; sIdx += 1) {
-      const section = SECTIONS[sIdx];
-      await queryInterface.bulkInsert('course_sections', [
+      await queryInterface.bulkInsert('courses', [
         {
-          course_id: courseId,
-          title: section.title,
-          sort_order: sIdx,
+          title: courseDef.title,
+          slug: courseDef.slug,
+          exam_category: courseDef.exam_category,
+          short_description: courseDef.short_description,
+          description: courseDef.description,
+          thumbnail_url: courseDef.thumbnail_url,
+          price: courseDef.price,
+          currency: courseDef.currency,
+          validity_days: courseDef.validity_days,
+          includes_qbank: courseDef.includes_qbank,
+          is_published: courseDef.is_published,
+          sort_order: courseDef.sort_order ?? cIdx,
           created_at: now,
           updated_at: now,
         },
       ]);
-      const [[{ id: sectionId }]] = await queryInterface.sequelize.query(
-        'SELECT id FROM course_sections WHERE course_id = :courseId AND title = :title',
-        { replacements: { courseId, title: section.title } }
-      );
 
-      const lectureRows = section.lectures.map((lec, lIdx) => ({
-        course_id: courseId,
-        section_id: sectionId,
-        title: lec.title,
-        description: `${lec.title} — part of ${section.title}.`,
-        video_provider: 'mock',
-        video_ref: `mock-lecture-${sIdx + 1}-${lIdx + 1}`,
-        duration_seconds: lec.minutes * 60,
-        is_free_preview: Boolean(lec.freePreview),
-        is_published: true,
-        sort_order: lIdx,
-        created_at: now,
-        updated_at: now,
-      }));
-      await queryInterface.bulkInsert('lectures', lectureRows);
+      const [[courseRow]] = await queryInterface.sequelize.query(
+        'SELECT id FROM courses WHERE slug = :slug',
+        { replacements: { slug: courseDef.slug } }
+      );
+      const courseId = courseRow.id;
+
+      for (let sIdx = 0; sIdx < courseDef.sections.length; sIdx += 1) {
+        const sectionDef = courseDef.sections[sIdx];
+        await queryInterface.bulkInsert('course_sections', [
+          {
+            course_id: courseId,
+            title: sectionDef.title,
+            sort_order: sIdx,
+            created_at: now,
+            updated_at: now,
+          },
+        ]);
+
+        const [[sectionRow]] = await queryInterface.sequelize.query(
+          'SELECT id FROM course_sections WHERE course_id = :courseId AND title = :title',
+          { replacements: { courseId, title: sectionDef.title } }
+        );
+        const sectionId = sectionRow.id;
+
+        const lectureRows = sectionDef.lectures.map((lec, lIdx) => ({
+          course_id: courseId,
+          section_id: sectionId,
+          title: lec.title,
+          description: `${lec.title} — essential clinical and basic science lecture for ${courseDef.title}.`,
+          video_provider: 'mock',
+          video_ref: `mock-${courseDef.slug}-s${sIdx + 1}-l${lIdx + 1}`,
+          duration_seconds: lec.duration_seconds || (lec.minutes || 20) * 60,
+          is_free_preview: Boolean(lec.is_free_preview),
+          is_published: true,
+          sort_order: lIdx,
+          created_at: now,
+          updated_at: now,
+        }));
+        await queryInterface.bulkInsert('lectures', lectureRows);
+      }
+      insertedCount += 1;
     }
 
-    console.log('[seed:course] inserted 1 course, 2 sections, 6 lectures.');
+    console.log(`[seed:course] inserted ${insertedCount} course(s).`);
   },
 
   async down(queryInterface) {
-    // FK ON DELETE CASCADE handles course_sections + lectures.
-    await queryInterface.bulkDelete('courses', { slug: COURSE_SLUG });
+    const courseSlugs = coursesData.map((c) => c.slug);
+    await queryInterface.bulkDelete('courses', { slug: courseSlugs });
   },
 };

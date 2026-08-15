@@ -1,49 +1,48 @@
 'use strict';
+
+// server/src/db/seeders/20260101010000-seed-01b-demo-student.cjs
+// Demo student accounts for development, testing, and initial bootstrap.
+
 const bcrypt = require('bcrypt');
+const { BCRYPT_ROUNDS, DEMO_STUDENTS } = require('../demoData/studentActivityData.cjs');
 
-const BCRYPT_ROUNDS = 12; // CLAUDE.md §1: bcrypt (12 rounds)
-
-// Demo/dev-only: a fake student account for local dev + manual QA. Split out
-// of seed-01-users.cjs so SEED_MODE=prod (real production go-live) never
-// creates it — see 09_DEPLOYMENT_HOSTINGER.md go-live runbook.
 /** @type {import('sequelize-cli').Seeder} */
 module.exports = {
   async up(queryInterface) {
-    if (process.env.SEED_MODE === 'prod') {
-      console.log('[seed:demo-student] skipped — SEED_MODE=prod (demo-only content).');
-      return;
-    }
-
     const now = new Date();
+    const emails = DEMO_STUDENTS.map((s) => s.email);
     const [existing] = await queryInterface.sequelize.query(
-      "SELECT email FROM users WHERE email = 'student@samsacademy.com'"
+      'SELECT email FROM users WHERE email IN (:emails)',
+      { replacements: { emails } }
     );
-    if (existing.length > 0) {
-      console.log('[seed:demo-student] demo student already present, skipping.');
-      return;
-    }
+    const existingEmails = new Set(existing.map((r) => r.email));
 
-    await queryInterface.bulkInsert('users', [
-      {
-        name: 'Demo Student',
-        email: 'student@samsacademy.com',
-        phone: null,
-        password_hash: bcrypt.hashSync('Student@123', BCRYPT_ROUNDS),
-        role: 'student',
-        status: 'active',
-        email_verified_at: now,
-        twofa_enabled: false,
-        twofa_secret: null,
-        twofa_backup_codes: null,
-        last_login_at: null,
-        created_at: now,
-        updated_at: now,
-      },
-    ]);
-    console.log('[seed:demo-student] inserted demo student user.');
+    const rows = DEMO_STUDENTS.filter((s) => !existingEmails.has(s.email)).map((s) => ({
+      name: s.name,
+      email: s.email,
+      phone: null,
+      password_hash: bcrypt.hashSync(s.password, BCRYPT_ROUNDS),
+      role: 'student',
+      status: 'active',
+      email_verified_at: now,
+      twofa_enabled: false,
+      twofa_secret: null,
+      twofa_backup_codes: null,
+      last_login_at: null,
+      created_at: now,
+      updated_at: now,
+    }));
+
+    if (rows.length > 0) {
+      await queryInterface.bulkInsert('users', rows);
+      console.log(`[seed:demo-student] inserted ${rows.length} demo student(s).`);
+    } else {
+      console.log('[seed:demo-student] demo students already present, skipping.');
+    }
   },
 
   async down(queryInterface) {
-    await queryInterface.bulkDelete('users', { email: 'student@samsacademy.com' });
+    const emails = DEMO_STUDENTS.map((s) => s.email);
+    await queryInterface.bulkDelete('users', { email: emails });
   },
 };
