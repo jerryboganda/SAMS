@@ -10,10 +10,11 @@ import {
   AlertCircle,
   Clock,
   Key,
+  Zap,
 } from "lucide-react";
 import { Modal, Button, Input, PasswordInput, Select, Checkbox, Badge } from "../ui";
 import { adminApi } from "../../api/endpoints/admin";
-import { Course, CourseAllocationItem, User } from "../../types";
+import { Course, CourseAllocationItem, SubscriptionPackage, User } from "../../types";
 import { formatDate } from "../../utils/formatters";
 
 export interface AddStudentModalProps {
@@ -29,11 +30,12 @@ export interface AddStudentModalProps {
     }
   ) => void;
   courses: Course[];
+  packages?: SubscriptionPackage[];
 }
 
 interface SelectedCourseState {
   courseId: number;
-  validityOption: "default" | "30" | "60" | "90" | "180" | "365" | "custom";
+  validityOption: "default" | "30" | "60" | "90" | "180" | "365" | "custom" | string;
   customDate?: string;
 }
 
@@ -71,6 +73,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
   onClose,
   onCreated,
   courses,
+  packages,
 }) => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -81,6 +84,9 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
   const [sendWelcomeEmail, setSendWelcomeEmail] = useState(true);
   const [selectedCourses, setSelectedCourses] = useState<SelectedCourseState[]>([]);
   const [courseToAdd, setCourseToAdd] = useState<number>(0);
+
+  const [packagesList, setPackagesList] = useState<SubscriptionPackage[]>(packages || []);
+  const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -99,10 +105,58 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
       setSendWelcomeEmail(true);
       setSelectedCourses([]);
       setCourseToAdd(0);
+      setSelectedPackageId("");
       setFormErrors({});
       setSubmitError(null);
+
+      // Load packages if not passed as prop
+      if (packages && packages.length > 0) {
+        setPackagesList(packages);
+      } else {
+        adminApi
+          .getPackages()
+          .then((data) => setPackagesList(data))
+          .catch((err) => console.error("Failed to load packages in AddStudentModal:", err));
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, packages]);
+
+  const handleQuickApplyPackage = (pkgIdStr: string) => {
+    if (!pkgIdStr) return;
+    const pkgId = Number(pkgIdStr);
+    const pkg = packagesList.find((p) => p.id === pkgId);
+    if (!pkg) return;
+
+    const courseIdsToAdd: number[] = [];
+    if (pkg.includedCourseIds && pkg.includedCourseIds.length > 0) {
+      courseIdsToAdd.push(...pkg.includedCourseIds);
+    } else if (pkg.includedCourses && pkg.includedCourses.length > 0) {
+      courseIdsToAdd.push(...pkg.includedCourses.map((c) => c.id));
+    }
+
+    if (courseIdsToAdd.length > 0) {
+      setSelectedCourses((prev) => {
+        const next = [...prev];
+        const validityOpt = String(pkg.validityDays);
+        for (const cid of courseIdsToAdd) {
+          const existingIdx = next.findIndex((sc) => sc.courseId === cid);
+          if (existingIdx >= 0) {
+            next[existingIdx] = {
+              ...next[existingIdx],
+              validityOption: validityOpt,
+            };
+          } else {
+            next.push({
+              courseId: cid,
+              validityOption: validityOpt,
+            });
+          }
+        }
+        return next;
+      });
+    }
+    setSelectedPackageId("");
+  };
 
   const handleGeneratePassword = () => {
     const newPass = generateStrongPassword();
@@ -445,6 +499,34 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
             <p className="text-xs text-[#DC2626] font-medium">{formErrors.courses}</p>
           )}
 
+          {/* 1-Click Quick-Apply Subscription Package Selector */}
+          {packagesList.length > 0 && (
+            <div className="p-3 bg-gradient-to-r from-teal-50/80 via-white to-teal-50/40 border border-teal-200/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-2 text-xs font-bold text-[#0E2A47]">
+                <div className="p-1 rounded-md bg-amber-100 text-amber-700">
+                  <Zap className="w-3.5 h-3.5" />
+                </div>
+                <span>1-Click Package Apply:</span>
+              </div>
+              <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
+                <select
+                  value={selectedPackageId}
+                  onChange={(e) => handleQuickApplyPackage(e.target.value)}
+                  className="w-full rounded-lg border border-teal-300 bg-white px-2.5 py-1.5 text-xs text-[#1E293B] font-medium focus:border-[#0FA3A3] focus:outline-none focus:ring-2 focus:ring-[#0FA3A3]/20 transition-all"
+                >
+                  <option value="">Quick-Apply Subscription Package...</option>
+                  {packagesList
+                    .filter((p) => p.isActive !== false)
+                    .map((pkg) => (
+                      <option key={pkg.id} value={pkg.id}>
+                        {pkg.title} ({pkg.validityDays}d — {pkg.includedCourseIds?.length || 0} courses)
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+          )}
+
           {/* Allocated Courses List */}
           {selectedCourses.length > 0 ? (
             <div className="space-y-2.5">
@@ -489,11 +571,18 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
                         <option value="default">
                           Course Default ({course?.validityDays || 180} Days)
                         </option>
-                        <option value="30">30 Days (+1 Month)</option>
-                        <option value="60">60 Days (+2 Months)</option>
-                        <option value="90">90 Days (+3 Months)</option>
-                        <option value="180">180 Days (+6 Months)</option>
-                        <option value="365">365 Days (+1 Year)</option>
+                        {["30", "60", "90", "180", "365", "730"].map((days) => (
+                          <option key={days} value={days}>
+                            {days} Days ({Math.round(Number(days) / 30)} Months)
+                          </option>
+                        ))}
+                        {!["default", "30", "60", "90", "180", "365", "730", "custom"].includes(
+                          sc.validityOption
+                        ) && (
+                          <option value={sc.validityOption}>
+                            {sc.validityOption} Days (Package Plan)
+                          </option>
+                        )}
                         <option value="custom">Custom Expiry Date</option>
                       </select>
 

@@ -63,6 +63,7 @@ import { MockExamsManagementPage } from "./pages/admin/MockExamsManagementPage";
 import { OrdersManagementPage } from "./pages/admin/OrdersManagementPage";
 import { ManualPaymentsPage } from "./pages/admin/ManualPaymentsPage";
 import { CouponsManagementPage } from "./pages/admin/CouponsManagementPage";
+import { SubscriptionsManagementPage } from "./pages/admin/SubscriptionsManagementPage";
 import { AnnouncementsManagementPage } from "./pages/admin/AnnouncementsManagementPage";
 import { FacultyManagementPage } from "./pages/admin/FacultyManagementPage";
 import { AnalyticsManagementPage } from "./pages/admin/AnalyticsManagementPage";
@@ -111,6 +112,7 @@ const PageTitleHandler: React.FC = () => {
     else if (path.startsWith("/admin/orders")) title = "Order Records | Admin Portal";
     else if (path.startsWith("/admin/manual-payments")) title = "Bank & Raast Verifications | Admin Portal";
     else if (path.startsWith("/admin/coupons")) title = "Coupons & Discounts | Admin Portal";
+    else if (path.startsWith("/admin/subscriptions")) title = "Subscriptions & Pricing | Admin Portal";
     else if (path.startsWith("/admin/announcements")) title = "Broadcast Announcements | Admin Portal";
     else if (path.startsWith("/admin/faculty")) title = "Faculty Profiles | Admin Portal";
     else if (path.startsWith("/admin/faqs")) title = "FAQ Management | Admin Portal";
@@ -221,6 +223,7 @@ export const App: React.FC = () => {
           <Route path="orders" element={<OrdersManagementPage />} />
           <Route path="orders/:id" element={<OrdersManagementPage />} />
           <Route path="coupons" element={<CouponsManagementPage />} />
+          <Route path="subscriptions" element={<SubscriptionsManagementPage />} />
           <Route path="announcements" element={<AnnouncementsManagementPage />} />
           <Route path="faculty" element={<FacultyManagementPage />} />
           <Route path="faqs" element={<FaqsManagementPage />} />

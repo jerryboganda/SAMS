@@ -135,7 +135,11 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
  * Helper to simulate network latency for mock calls (300ms to 500ms by default)
  */
 export function mockLatency<T>(result: T, delayMs: number = 350): Promise<T> {
-  const isSlow = typeof window !== "undefined" && localStorage.getItem("sams_dev_slow_network") === "true";
+  const isSlow =
+    typeof window !== "undefined" &&
+    typeof localStorage !== "undefined" &&
+    typeof localStorage.getItem === "function" &&
+    localStorage.getItem("sams_dev_slow_network") === "true";
   const actualDelay = isSlow ? delayMs + 2000 : delayMs;
   return new Promise((resolve) => {
     setTimeout(() => {

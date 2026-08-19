@@ -1,7 +1,7 @@
 import { CONFIG } from "../../config";
 import { apiFetch, mockLatency } from "../client";
-import { Course, FacultyMember, FAQ, Question } from "../../types";
-import { MOCK_COURSES, MOCK_FACULTY, MOCK_FAQS, MOCK_QUESTIONS, MOCK_SECTIONS } from "../../mock-data";
+import { Course, FacultyMember, FAQ, Question, SubscriptionPackage } from "../../types";
+import { MOCK_COURSES, MOCK_FACULTY, MOCK_FAQS, MOCK_PACKAGES, MOCK_QUESTIONS, MOCK_SECTIONS } from "../../mock-data";
 
 /** The 4 admin-editable content keys the backend Settings table exposes via
  * GET /public/pages/:key (server/src/config/constants.js PUBLIC_PAGE_KEYS). */
@@ -72,6 +72,14 @@ export const publicApi = {
       return { course, sections };
     }
     return apiFetch<{ course: Course; sections: any[] }>(`/public/courses/${slug}`);
+  },
+
+  async getPublicPackages(): Promise<SubscriptionPackage[]> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 300);
+      return MOCK_PACKAGES.filter((p) => p.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+    }
+    return apiFetch<SubscriptionPackage[]>("/packages");
   },
 
   async getFaculty(): Promise<FacultyMember[]> {

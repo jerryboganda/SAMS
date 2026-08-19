@@ -426,3 +426,55 @@ export interface ApiResponseEnvelope<T> {
     details?: any;
   };
 }
+
+export interface SubscriptionPackage {
+  id: number;
+  title: string;
+  slug: string;
+  description?: string | null;
+  examCategory: string;
+  price: number;
+  originalPrice?: number | null;
+  currency: string;
+  validityDays: number;
+  includedCourseIds: number[];
+  includedCourses?: {
+    id: number;
+    title: string;
+    examCategory: string;
+    validityDays: number;
+  }[];
+  includesQbank: boolean;
+  includesMockExams: boolean;
+  maxDevices: number;
+  features: string[];
+  badge?: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  isPopular: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreatePackagePayload {
+  title: string;
+  slug?: string;
+  description?: string | null;
+  examCategory?: string;
+  price: number;
+  originalPrice?: number | null;
+  currency?: string;
+  validityDays?: number;
+  includedCourseIds?: number[];
+  includesQbank?: boolean;
+  includesMockExams?: boolean;
+  maxDevices?: number;
+  features?: string[];
+  badge?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
+  isPopular?: boolean;
+}
+
+export type UpdatePackagePayload = Partial<CreatePackagePayload>;
+

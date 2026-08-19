@@ -29,12 +29,14 @@ import enrollmentsRouter from './enrollments.js';
 import questionsRouter from './questions.js';
 import questionImportRouter from './questionImport.js';
 import taxonomyRouter from './taxonomy.js';
+import packagesRouter from './packages.js';
 
 const router = Router();
 
 router.use(auth, deviceCheck, requireRole('admin'));
 
 router.use(coursesRouter);
+router.use(packagesRouter);
 router.use(uploadsRouter);
 router.use(facultyRouter);
 router.use(faqsRouter);

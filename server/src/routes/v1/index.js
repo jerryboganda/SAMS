@@ -14,12 +14,14 @@ import ordersRouter from './orders.js';
 import webhooksRouter from './webhooks.js';
 import notificationsRouter from './notifications.js';
 import announcementsRouter from './announcements.js';
+import packagesRouter from './packages.js';
 
 const router = Router();
 
 router.use('/health', health);
 router.use('/auth', auth);
 router.use('/public', publicRouter);
+router.use('/packages', packagesRouter);
 router.use('/admin', adminRouter);
 router.use('/student', studentRouter);
 // Top-level, NOT under /student — see routes/v1/qbank.js's header comment.

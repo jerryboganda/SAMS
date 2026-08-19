@@ -21,6 +21,9 @@ import {
   PaymentEvent,
   Question,
   Subject,
+  SubscriptionPackage,
+  CreatePackagePayload,
+  UpdatePackagePayload,
   UpdateStudentPayload,
   User,
   UserDevice,
@@ -38,6 +41,7 @@ import {
   MOCK_LOGIN_EVENTS,
   MOCK_NOTIFICATIONS,
   MOCK_ORDERS,
+  MOCK_PACKAGES,
   MOCK_PAYMENT_EVENTS,
   MOCK_QUESTIONS,
   MOCK_SECTIONS,
@@ -769,6 +773,166 @@ export const adminApi = {
       return MOCK_AUDIT_LOGS;
     }
     return apiFetch<AuditLog[]>("/admin/audit-logs");
+  },
+
+  // Subscription Packages endpoints
+  async getPackages(): Promise<SubscriptionPackage[]> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      return MOCK_PACKAGES;
+    }
+    return apiFetch<SubscriptionPackage[]>("/admin/packages");
+  },
+
+  async getPackageById(id: number | string): Promise<SubscriptionPackage | null> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 200);
+      const pkg = MOCK_PACKAGES.find((p) => p.id === Number(id) || p.slug === String(id));
+      return pkg || null;
+    }
+    return apiFetch<SubscriptionPackage>(`/admin/packages/${id}`);
+  },
+
+  async createPackage(payload: CreatePackagePayload): Promise<SubscriptionPackage> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 350);
+      const slug = payload.slug || payload.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const newPkg: SubscriptionPackage = {
+        id: Date.now(),
+        title: payload.title.trim(),
+        slug,
+        description: payload.description ?? null,
+        examCategory: payload.examCategory || "NRE1",
+        price: Number(payload.price) || 0,
+        originalPrice: payload.originalPrice !== undefined && payload.originalPrice !== null ? Number(payload.originalPrice) : null,
+        currency: payload.currency || "PKR",
+        validityDays: Number(payload.validityDays) || 180,
+        includedCourseIds: payload.includedCourseIds || [],
+        includedCourses: (payload.includedCourseIds || [])
+          .map((cId) => {
+            const c = MOCK_COURSES.find((item) => item.id === Number(cId));
+            return c ? { id: c.id, title: c.title, examCategory: c.examCategory, validityDays: c.validityDays } : null;
+          })
+          .filter(Boolean) as any,
+        includesQbank: payload.includesQbank !== false,
+        includesMockExams: payload.includesMockExams !== false,
+        maxDevices: payload.maxDevices || 2,
+        features: payload.features || [],
+        badge: payload.badge ?? null,
+        sortOrder: payload.sortOrder ?? MOCK_PACKAGES.length + 1,
+        isActive: payload.isActive !== false,
+        isPopular: Boolean(payload.isPopular),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      MOCK_PACKAGES.unshift(newPkg);
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "package.create",
+        entityType: "SubscriptionPackage",
+        entityId: newPkg.id,
+        summary: `Created subscription package "${newPkg.title}"`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+      return newPkg;
+    }
+    return apiFetch<SubscriptionPackage>("/admin/packages", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updatePackage(id: number | string, payload: UpdatePackagePayload): Promise<SubscriptionPackage> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 300);
+      const pkg = MOCK_PACKAGES.find((p) => p.id === Number(id));
+      if (!pkg) {
+        throw new Error("Package not found");
+      }
+      Object.assign(pkg, {
+        ...payload,
+        updatedAt: new Date().toISOString(),
+      });
+      if (payload.includedCourseIds) {
+        pkg.includedCourses = payload.includedCourseIds
+          .map((cId) => {
+            const c = MOCK_COURSES.find((item) => item.id === Number(cId));
+            return c ? { id: c.id, title: c.title, examCategory: c.examCategory, validityDays: c.validityDays } : null;
+          })
+          .filter(Boolean) as any;
+      }
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "package.update",
+        entityType: "SubscriptionPackage",
+        entityId: Number(id),
+        summary: `Updated subscription package #${id} ("${pkg.title}")`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+      return pkg;
+    }
+    return apiFetch<SubscriptionPackage>(`/admin/packages/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async togglePackageActive(id: number | string): Promise<SubscriptionPackage> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 250);
+      const pkg = MOCK_PACKAGES.find((p) => p.id === Number(id));
+      if (!pkg) {
+        throw new Error("Package not found");
+      }
+      pkg.isActive = !pkg.isActive;
+      pkg.updatedAt = new Date().toISOString();
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "package.toggle",
+        entityType: "SubscriptionPackage",
+        entityId: Number(id),
+        summary: `Toggled active state on subscription package #${id} (${pkg.isActive ? "ACTIVE" : "INACTIVE"})`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+      return pkg;
+    }
+    return apiFetch<SubscriptionPackage>(`/admin/packages/${id}/toggle`, {
+      method: "POST",
+    });
+  },
+
+  async deletePackage(id: number | string): Promise<{ success: boolean; message?: string }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 300);
+      const idx = MOCK_PACKAGES.findIndex((p) => p.id === Number(id));
+      if (idx !== -1) {
+        const deleted = MOCK_PACKAGES.splice(idx, 1)[0];
+        MOCK_AUDIT_LOGS.unshift({
+          id: Date.now(),
+          actorUserId: 2,
+          actorName: "Dr. Zabih Ullah (Admin)",
+          action: "package.delete",
+          entityType: "SubscriptionPackage",
+          entityId: Number(id),
+          summary: `Deleted subscription package #${id} ("${deleted?.title || id}")`,
+          ip: "182.180.122.45",
+          createdAt: new Date().toISOString(),
+        });
+      }
+      return { success: true, message: "Package deleted successfully." };
+    }
+    return apiFetch<{ success: boolean; message?: string }>(`/admin/packages/${id}`, {
+      method: "DELETE",
+    });
   },
 
   // Courses endpoints
