@@ -10,6 +10,7 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "migrate": "sequelize-cli db:migrate",
+    "migrate:auto": "node -e \"import('./src/db/autoMigrate.js').then(m => m.runAutoMigrations()).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); })\"",
     "migrate:undo": "sequelize-cli db:migrate:undo",
     "migrate:undo:all": "sequelize-cli db:migrate:undo:all",
     "seed": "sequelize-cli db:seed:all",

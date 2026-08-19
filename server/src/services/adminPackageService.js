@@ -229,7 +229,7 @@ async function ensureTableExists() {
       ]).catch(() => {});
     }
     tableEnsured = true;
-  } catch (_err) {
+  } catch {
     // Non-fatal warning — log and continue
   }
 }
@@ -249,7 +249,7 @@ export async function listAllPackages() {
         ['id', 'DESC'],
       ],
     });
-  } catch (_err) {
+  } catch {
     // Self-healing attempt if table was missing
     await SubscriptionPackage.sync().catch(() => {});
     packages = await SubscriptionPackage.findAll({

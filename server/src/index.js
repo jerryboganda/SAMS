@@ -108,12 +108,10 @@ async function start() {
 
   if (dbConnected && env.NODE_ENV !== 'test') {
     try {
-      const { SubscriptionPackage } = (await import('./models/index.js')).default;
-      if (SubscriptionPackage) {
-        await SubscriptionPackage.sync().catch(() => {});
-      }
-    } catch {
-      // Non-fatal table sync check
+      const { runAutoMigrations } = await import('./db/autoMigrate.js');
+      await runAutoMigrations();
+    } catch (err) {
+      logger.error(`[db] auto-migration error on startup: ${err.message}`);
     }
   }
 

@@ -15,6 +15,7 @@
     "build": "npm run build --prefix client",
     "start": "cross-env NODE_ENV=production node server/src/index.js",
     "migrate": "npm run migrate --prefix server",
+    "migrate:auto": "npm run migrate:auto --prefix server",
     "migrate:undo": "npm run migrate:undo --prefix server",
     "migrate:undo:all": "npm run migrate:undo:all --prefix server",
     "seed": "npm run seed --prefix server",
