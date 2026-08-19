@@ -90,11 +90,11 @@ export const SubscriptionsManagementPage: React.FC = () => {
         adminApi.getPackages(),
         adminApi.getCourses().catch(() => []),
       ]);
-      setPackages(packagesData);
-      setCourses(coursesData);
+      setPackages(Array.isArray(packagesData) ? packagesData : []);
+      setCourses(Array.isArray(coursesData) ? coursesData : []);
     } catch (err: any) {
       console.error("Failed to load subscription packages or courses:", err);
-      setError(err.message || "Failed to load packages. Please check server connection.");
+      setError(err.message || "Failed to load subscription packages. Please check server connection.");
     } finally {
       setLoading(false);
     }

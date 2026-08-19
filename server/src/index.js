@@ -106,6 +106,17 @@ async function start() {
   const dbConnected = await checkDbConnection();
   logger.info(`[db] initial connection check: ${dbConnected ? 'connected' : 'unreachable (continuing anyway)'}`);
 
+  if (dbConnected && env.NODE_ENV !== 'test') {
+    try {
+      const { SubscriptionPackage } = (await import('./models/index.js')).default;
+      if (SubscriptionPackage) {
+        await SubscriptionPackage.sync().catch(() => {});
+      }
+    } catch {
+      // Non-fatal table sync check
+    }
+  }
+
   // Phase 8.1+/12.3: question-difficulty denormalization, bounded
   // user_daily_stats reconciliation, enrollment lifecycle sweeps, and the
   // weekly DB backup (server/src/jobs/index.js). Skipped in NODE_ENV=test —

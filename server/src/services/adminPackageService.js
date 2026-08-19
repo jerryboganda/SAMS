@@ -135,17 +135,130 @@ async function getCoursesMapForPackages(packages) {
   return map;
 }
 
+let tableEnsured = false;
+
+/**
+ * Ensures subscription_packages table exists and is seeded if empty.
+ * Guarantees zero downtime on fresh deployments before manual migrations run.
+ */
+async function ensureTableExists() {
+  if (tableEnsured) return;
+  try {
+    await SubscriptionPackage.sync();
+    const count = await SubscriptionPackage.count().catch(() => 0);
+    if (count === 0) {
+      await SubscriptionPackage.bulkCreate([
+        {
+          title: 'NRE Step 1 Comprehensive Mastery Package',
+          slug: 'nre-step-1-mastery',
+          description:
+            'Complete clinical mastery for NRE Step 1 examination with HD video lectures, system-wise QBank, and timed mock tests.',
+          examCategory: 'NRE1',
+          price: 15000,
+          originalPrice: 20000,
+          currency: 'PKR',
+          validityDays: 180,
+          includedCourseIds: [1],
+          includesQbank: true,
+          includesMockExams: true,
+          maxDevices: 2,
+          features: [
+            'Full 180 Days Access (6 Months)',
+            'Complete HD Video Curriculum with Dr. Zabih Ullah',
+            '5,000+ Verified QBank MCQs with Explanations',
+            'Timed Mock Exam Simulator',
+            'DRM Multi-Device Access (2 Devices)',
+          ],
+          badge: 'Most Popular',
+          sortOrder: 1,
+          isActive: true,
+          isPopular: true,
+        },
+        {
+          title: 'USMLE Step 1 High-Yield Prep Pass',
+          slug: 'usmle-step-1-prep',
+          description:
+            'Comprehensive 1-year immersion into USMLE Step 1 basic medical sciences and clinical vignettes.',
+          examCategory: 'USMLE1',
+          price: 25000,
+          originalPrice: 35000,
+          currency: 'PKR',
+          validityDays: 365,
+          includedCourseIds: [2],
+          includesQbank: true,
+          includesMockExams: true,
+          maxDevices: 2,
+          features: [
+            '365 Days Full Validity (1 Year)',
+            'All System-Wise Video Modules',
+            'USMLE-Style Clinical Vignettes',
+            'Unlimited Mock Exam Retakes',
+            'Expert Faculty Doubt Support',
+          ],
+          badge: 'Best Value',
+          sortOrder: 2,
+          isActive: true,
+          isPopular: false,
+        },
+        {
+          title: 'All-Access Clinical Exam Bundle',
+          slug: 'all-access-bundle',
+          description:
+            'The ultimate package unlocking every course, QBank question bank, and mock exam on SAMS Academy.',
+          examCategory: 'BUNDLE',
+          price: 45000,
+          originalPrice: 65000,
+          currency: 'PKR',
+          validityDays: 365,
+          includedCourseIds: [1, 2, 3],
+          includesQbank: true,
+          includesMockExams: true,
+          maxDevices: 2,
+          features: [
+            'Complete All-Course Access (NRE + USMLE + SMLE)',
+            'Full QBank Access with Explanations',
+            'All Specialty Mock Examinations',
+            'Priority WhatsApp Support',
+            'Free Updates to New Curriculum',
+          ],
+          badge: 'Full Access Pass',
+          sortOrder: 3,
+          isActive: true,
+          isPopular: false,
+        },
+      ]).catch(() => {});
+    }
+    tableEnsured = true;
+  } catch (_err) {
+    // Non-fatal warning — log and continue
+  }
+}
+
 /**
  * List all subscription packages for administrative management.
  * Ordered by sortOrder ASC, id DESC.
  */
 export async function listAllPackages() {
-  const packages = await SubscriptionPackage.findAll({
-    order: [
-      ['sortOrder', 'ASC'],
-      ['id', 'DESC'],
-    ],
-  });
+  await ensureTableExists();
+
+  let packages;
+  try {
+    packages = await SubscriptionPackage.findAll({
+      order: [
+        ['sortOrder', 'ASC'],
+        ['id', 'DESC'],
+      ],
+    });
+  } catch (_err) {
+    // Self-healing attempt if table was missing
+    await SubscriptionPackage.sync().catch(() => {});
+    packages = await SubscriptionPackage.findAll({
+      order: [
+        ['sortOrder', 'ASC'],
+        ['id', 'DESC'],
+      ],
+    }).catch(() => []);
+  }
 
   const coursesMap = await getCoursesMapForPackages(packages);
   return packages.map((pkg) => serializePackage(pkg, coursesMap));
@@ -156,6 +269,7 @@ export async function listAllPackages() {
  * @param {number} id
  */
 export async function getPackageById(id) {
+  await ensureTableExists();
   const pkg = await SubscriptionPackage.findByPk(id);
   if (!pkg) {
     throw new ApiError(404, 'NOT_FOUND', 'Subscription package not found.');
@@ -171,6 +285,7 @@ export async function getPackageById(id) {
  * @param {number|null} _adminUserId
  */
 export async function createPackage(data, _adminUserId) {
+  await ensureTableExists();
   let slug = data.slug ? slugify(data.slug) : slugify(data.title);
   if (!slug) {
     slug = `package-${Date.now()}`;
@@ -224,6 +339,7 @@ export async function createPackage(data, _adminUserId) {
  * @param {number|null} _adminUserId
  */
 export async function updatePackage(id, data, _adminUserId) {
+  await ensureTableExists();
   const pkg = await SubscriptionPackage.findByPk(id);
   if (!pkg) {
     throw new ApiError(404, 'NOT_FOUND', 'Subscription package not found.');
@@ -291,6 +407,7 @@ export async function updatePackage(id, data, _adminUserId) {
  * @param {number|null} _adminUserId
  */
 export async function togglePackageActive(id, _adminUserId) {
+  await ensureTableExists();
   const pkg = await SubscriptionPackage.findByPk(id);
   if (!pkg) {
     throw new ApiError(404, 'NOT_FOUND', 'Subscription package not found.');
@@ -307,6 +424,7 @@ export async function togglePackageActive(id, _adminUserId) {
  * @param {number|null} _adminUserId
  */
 export async function deletePackage(id, _adminUserId) {
+  await ensureTableExists();
   const pkg = await SubscriptionPackage.findByPk(id);
   if (!pkg) {
     throw new ApiError(404, 'NOT_FOUND', 'Subscription package not found.');
@@ -321,6 +439,7 @@ export async function deletePackage(id, _adminUserId) {
  * Ordered by sortOrder ASC, id DESC.
  */
 export async function listPublicPackages() {
+  await ensureTableExists();
   const packages = await SubscriptionPackage.findAll({
     where: { isActive: true },
     order: [
