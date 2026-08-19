@@ -5,6 +5,7 @@
 // reset-devices block is THE Phase 11.2 acceptance criterion: "reset-devices
 // logs audit + revokes tokens (test)".
 import { afterAll, describe, expect, test } from '@jest/globals';
+import bcrypt from 'bcrypt';
 import request from 'supertest';
 import app from '../../src/app.js';
 import db from '../../src/models/index.js';
@@ -127,6 +128,148 @@ describe('GET /api/v1/admin/students', () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /admin/students — Manual Student Registration
+// ---------------------------------------------------------------------------
+
+describe('POST /api/v1/admin/students', () => {
+  test('happy path: successfully creates student without course allocations, checks status === "active", emailVerifiedAt set, password not returned, audit log created', async () => {
+    const { agent, user: admin } = await createAdminSession(app);
+    const email = uniqueEmail('manual-create');
+    const payload = {
+      name: 'Manual New Student',
+      email,
+      password: 'NewPassword@123',
+      phone: '+923001234567',
+      status: 'active',
+      emailVerified: true,
+      enrollments: [],
+    };
+
+    const res = await agent.post('/api/v1/admin/students').send(payload);
+    expect(res.status).toBe(201);
+    expect(res.body.data.id).toBeDefined();
+    expect(res.body.data.name).toBe('Manual New Student');
+    expect(res.body.data.email).toBe(email.toLowerCase());
+    expect(res.body.data.phone).toBe('+923001234567');
+    expect(res.body.data.status).toBe('active');
+    expect(res.body.data.emailVerifiedAt).not.toBeNull();
+    expect(res.body.data.password).toBeUndefined();
+    expect(res.body.data.passwordHash).toBeUndefined();
+    expect(res.body.data.twofaSecret).toBeUndefined();
+    expect(res.body.data.twofaBackupCodes).toBeUndefined();
+    expect(res.body.data.enrollments).toEqual([]);
+
+    const fresh = await User.findByPk(res.body.data.id);
+    expect(fresh).not.toBeNull();
+    expect(fresh.role).toBe('student');
+    expect(fresh.status).toBe('active');
+    expect(fresh.emailVerifiedAt).not.toBeNull();
+    const matches = await bcrypt.compare('NewPassword@123', fresh.passwordHash);
+    expect(matches).toBe(true);
+
+    const auditRow = await AuditLog.findOne({ where: { action: 'student.create', entityId: res.body.data.id } });
+    expect(auditRow).not.toBeNull();
+    expect(auditRow.actorUserId).toBe(admin.id);
+    expect(auditRow.entityType).toBe('User');
+    expect(auditRow.summary).toMatch(/Manual New Student/);
+  });
+
+  test('happy path: multiple course allocations with preset days and ISO date validity', async () => {
+    const { agent } = await createAdminSession(app);
+    const course1 = await createCourse();
+    const course2 = await createCourse();
+    const targetExpiry = new Date(Date.now() + 60 * 86400000);
+    const isoExpiry = targetExpiry.toISOString();
+    const email = uniqueEmail('manual-courses');
+
+    const payload = {
+      name: 'Multi Enrolled Student',
+      email,
+      password: 'Password@123',
+      phone: '+923007654321',
+      status: 'active',
+      emailVerified: true,
+      enrollments: [
+        { courseId: course1.id, days: 90, validityMode: 'days' },
+        { courseId: course2.id, validityMode: 'date', expiresAt: isoExpiry },
+      ],
+    };
+
+    const res = await agent.post('/api/v1/admin/students').send(payload);
+    expect(res.status).toBe(201);
+    expect(res.body.data.enrollments.length).toBe(2);
+
+    const enrs = await Enrollment.findAll({ where: { userId: res.body.data.id } });
+    expect(enrs.length).toBe(2);
+
+    const enr1 = enrs.find((e) => e.courseId === course1.id);
+    expect(enr1).toBeDefined();
+    expect(enr1.source).toBe('manual');
+    expect(enr1.status).toBe('active');
+    const daysMs1 = new Date(enr1.expiresAt).getTime() - new Date(enr1.startsAt).getTime();
+    expect(Math.round(daysMs1 / 86400000)).toBe(90);
+
+    const enr2 = enrs.find((e) => e.courseId === course2.id);
+    expect(enr2).toBeDefined();
+    expect(enr2.source).toBe('manual');
+    expect(enr2.status).toBe('active');
+    expect(Math.abs(new Date(enr2.expiresAt).getTime() - targetExpiry.getTime())).toBeLessThan(5000);
+  });
+
+  test('email collision error: attempting to create with existing email returns 409 EMAIL_EXISTS', async () => {
+    const { agent } = await createAdminSession(app);
+    const { user: existing } = await createVerifiedUser({ email: uniqueEmail('existing-stu'), role: 'student' });
+
+    const res = await agent.post('/api/v1/admin/students').send({
+      name: 'Duplicate Student',
+      email: existing.email,
+      password: 'Password@123',
+    });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('EMAIL_EXISTS');
+  });
+
+  test('validation failures: short password or invalid email returns 422 VALIDATION_ERROR', async () => {
+    const { agent } = await createAdminSession(app);
+
+    const resShortPass = await agent.post('/api/v1/admin/students').send({
+      name: 'Short Pass',
+      email: uniqueEmail('shortpass'),
+      password: '123',
+    });
+    expect(resShortPass.status).toBe(422);
+    expect(resShortPass.body.error.code).toBe('VALIDATION_ERROR');
+
+    const resInvalidEmail = await agent.post('/api/v1/admin/students').send({
+      name: 'Invalid Email',
+      email: 'not-an-email',
+      password: 'Password@123',
+    });
+    expect(resInvalidEmail.status).toBe(422);
+    expect(resInvalidEmail.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  test('auth failure: no session -> 401, role failure: student session -> 403', async () => {
+    const resUnauth = await request(app).post('/api/v1/admin/students').send({
+      name: 'No Auth',
+      email: uniqueEmail('noauth'),
+      password: 'Password@123',
+    });
+    expect(resUnauth.status).toBe(401);
+    expect(resUnauth.body.error.code).toBe('UNAUTHENTICATED');
+
+    const { agent: studentAgent } = await createStudentSession(app);
+    const resForbidden = await studentAgent.post('/api/v1/admin/students').send({
+      name: 'Student Caller',
+      email: uniqueEmail('stucaller'),
+      password: 'Password@123',
+    });
+    expect(resForbidden.status).toBe(403);
+    expect(resForbidden.body.error.code).toBe('FORBIDDEN');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /admin/students/:id
 // ---------------------------------------------------------------------------
 
@@ -166,6 +309,147 @@ describe('GET /api/v1/admin/students/:id', () => {
     const { user: student } = await createVerifiedUser({ email: uniqueEmail('detail-403'), role: 'student' });
     const res = await agent.get(`/api/v1/admin/students/${student.id}`);
     expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PUT /admin/students/:id — Full Student Profile Update
+// ---------------------------------------------------------------------------
+
+describe('PUT /api/v1/admin/students/:id', () => {
+  test('happy path: updates student name, phone, status to suspended, and password; audit log created', async () => {
+    const { agent, user: admin } = await createAdminSession(app);
+    const { user: student } = await createVerifiedUser({ email: uniqueEmail('update-target'), role: 'student', name: 'Old Name' });
+
+    const res = await agent.put(`/api/v1/admin/students/${student.id}`).send({
+      name: 'New Updated Name',
+      phone: '+923009998877',
+      status: 'suspended',
+      password: 'NewStrongPassword@999',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.id).toBe(student.id);
+    expect(res.body.data.name).toBe('New Updated Name');
+    expect(res.body.data.phone).toBe('+923009998877');
+    expect(res.body.data.status).toBe('suspended');
+
+    const fresh = await User.findByPk(student.id);
+    expect(fresh.name).toBe('New Updated Name');
+    expect(fresh.phone).toBe('+923009998877');
+    expect(fresh.status).toBe('suspended');
+    const matches = await bcrypt.compare('NewStrongPassword@999', fresh.passwordHash);
+    expect(matches).toBe(true);
+
+    const auditRow = await AuditLog.findOne({ where: { action: 'student.update', entityId: student.id } });
+    expect(auditRow).not.toBeNull();
+    expect(auditRow.actorUserId).toBe(admin.id);
+    expect(auditRow.entityType).toBe('User');
+    expect(auditRow.summary).toMatch(/Updated student profile/);
+  });
+
+  test('email collision on update: changing email to an existing user email returns 409', async () => {
+    const { agent } = await createAdminSession(app);
+    const { user: student1 } = await createVerifiedUser({ email: uniqueEmail('col-target1'), role: 'student' });
+    const { user: student2 } = await createVerifiedUser({ email: uniqueEmail('col-target2'), role: 'student' });
+
+    const res = await agent.put(`/api/v1/admin/students/${student1.id}`).send({
+      email: student2.email,
+    });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('EMAIL_EXISTS');
+  });
+
+  test('not found: unknown id returns 404', async () => {
+    const { agent } = await createAdminSession(app);
+    const res = await agent.put('/api/v1/admin/students/9999999').send({
+      name: 'Does Not Exist',
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test('auth failure: no session -> 401, role failure: student session -> 403', async () => {
+    const { user: student } = await createVerifiedUser({ email: uniqueEmail('auth-put'), role: 'student' });
+
+    const resUnauth = await request(app).put(`/api/v1/admin/students/${student.id}`).send({ name: 'Hacker' });
+    expect(resUnauth.status).toBe(401);
+    expect(resUnauth.body.error.code).toBe('UNAUTHENTICATED');
+
+    const { agent: studentAgent } = await createStudentSession(app);
+    const resForbidden = await studentAgent.put(`/api/v1/admin/students/${student.id}`).send({ name: 'Hacker' });
+    expect(resForbidden.status).toBe(403);
+    expect(resForbidden.body.error.code).toBe('FORBIDDEN');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /admin/students/:id — Delete or Anonymize Student
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/v1/admin/students/:id', () => {
+  test('happy path (fresh student with no orders/tests): completely deletes user row and returns success message', async () => {
+    const { agent, user: admin } = await createAdminSession(app);
+    const { user: student } = await createVerifiedUser({ email: uniqueEmail('del-fresh'), role: 'student' });
+    await createTestDevice(student.id);
+    await createTestRefreshToken(student.id);
+
+    const res = await agent.delete(`/api/v1/admin/students/${student.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.success).toBe(true);
+    expect(typeof res.body.data.message).toBe('string');
+
+    const fresh = await User.findByPk(student.id);
+    expect(fresh).toBeNull();
+
+    const auditRow = await AuditLog.findOne({ where: { action: 'student.delete', entityId: student.id } });
+    expect(auditRow).not.toBeNull();
+    expect(auditRow.actorUserId).toBe(admin.id);
+    expect(auditRow.entityType).toBe('User');
+  });
+
+  test('happy path (student with order history): anonymizes user account preserving order history', async () => {
+    const { agent, user: admin } = await createAdminSession(app);
+    const { user: student } = await createVerifiedUser({ email: uniqueEmail('del-orders'), role: 'student' });
+    const course = await createCourse();
+    const order = await createTestOrder(student, course);
+
+    const res = await agent.delete(`/api/v1/admin/students/${student.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Deleted user');
+    expect(res.body.data.email).toBe(`deleted-user-${student.id}@anonymized.invalid`);
+
+    const fresh = await User.findByPk(student.id);
+    expect(fresh).not.toBeNull();
+    expect(fresh.name).toBe('Deleted user');
+    expect(fresh.email).toBe(`deleted-user-${student.id}@anonymized.invalid`);
+    expect(fresh.status).toBe('suspended');
+
+    const freshOrder = await Order.findByPk(order.id);
+    expect(freshOrder).not.toBeNull();
+    expect(freshOrder.userId).toBe(student.id);
+
+    const auditRow = await AuditLog.findOne({ where: { action: 'student.delete', entityId: student.id } });
+    expect(auditRow).not.toBeNull();
+    expect(auditRow.actorUserId).toBe(admin.id);
+    expect(auditRow.entityType).toBe('User');
+  });
+
+  test('not found: unknown id returns 404', async () => {
+    const { agent } = await createAdminSession(app);
+    const res = await agent.delete('/api/v1/admin/students/9999999');
+    expect(res.status).toBe(404);
+  });
+
+  test('auth failure: no session -> 401, role failure: student session -> 403', async () => {
+    const { user: student } = await createVerifiedUser({ email: uniqueEmail('del-auth'), role: 'student' });
+
+    const resUnauth = await request(app).delete(`/api/v1/admin/students/${student.id}`);
+    expect(resUnauth.status).toBe(401);
+    expect(resUnauth.body.error.code).toBe('UNAUTHENTICATED');
+
+    const { agent: studentAgent } = await createStudentSession(app);
+    const resForbidden = await studentAgent.delete(`/api/v1/admin/students/${student.id}`);
+    expect(resForbidden.status).toBe(403);
+    expect(resForbidden.body.error.code).toBe('FORBIDDEN');
   });
 });
 

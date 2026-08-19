@@ -20,6 +20,33 @@ export interface User {
   activeDevicesCount?: number;
 }
 
+export interface CourseAllocationItem {
+  courseId: number;
+  validityMode?: "days" | "date";
+  days?: number;
+  expiresAt?: string;
+}
+
+export interface CreateStudentPayload {
+  name: string;
+  email: string;
+  password?: string;
+  phone?: string | null;
+  status?: "active" | "pending" | "suspended";
+  emailVerified?: boolean;
+  enrollments?: CourseAllocationItem[];
+  sendWelcomeEmail?: boolean;
+}
+
+export interface UpdateStudentPayload {
+  name?: string;
+  email?: string;
+  phone?: string | null;
+  status?: "active" | "pending" | "suspended";
+  emailVerified?: boolean;
+  password?: string;
+}
+
 export interface UserDevice {
   id: number;
   userId: number;

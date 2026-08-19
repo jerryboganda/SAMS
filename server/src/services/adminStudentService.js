@@ -10,11 +10,13 @@ import { Op, fn, col } from 'sequelize';
 import db from '../models/index.js';
 import { ApiError } from '../utils/apiError.js';
 import { randomTokenHex } from '../utils/crypto.js';
+import { sendMail } from '../utils/mailer.js';
+import { env } from '../config/env.js';
 import { serializeUser } from './authService.js';
 import { listDevicesForUser } from './deviceService.js';
 import { ORDER_ASSOCIATIONS, serializeOrder } from './orderService.js';
 
-const { User, UserDevice, RefreshToken, LoginEvent, Order, Enrollment, Course, sequelize } = db;
+const { User, UserDevice, RefreshToken, LoginEvent, Order, Enrollment, Course, TestSession, sequelize } = db;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // Matches authService.js's own BCRYPT_ROUNDS exactly (not exported from
@@ -420,9 +422,225 @@ export async function revokeEnrollment(enrollmentId) {
   return serializeEnrollment(fresh);
 }
 
+// ---------------------------------------------------------------------------
+// POST /admin/students — Manual Student Registration
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a student account directly by admin with optional initial enrollments
+ * and optional welcome email containing login credentials.
+ */
+export async function createStudentManually({
+  name,
+  email,
+  password,
+  phone,
+  status = 'active',
+  emailVerified = true,
+  enrollments = [],
+  sendWelcomeEmail = false,
+  adminUserId: _adminUserId,
+}) {
+  const normalizedEmail = (email || '').toLowerCase().trim();
+
+  const existingUser = await User.findOne({ where: { email: normalizedEmail } });
+  if (existingUser) {
+    throw new ApiError(409, 'EMAIL_EXISTS', 'A user with this email address already exists.');
+  }
+
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+  const createdUser = await sequelize.transaction(async (transaction) => {
+    const user = await User.create(
+      {
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: phone && phone.trim() ? phone.trim() : null,
+        passwordHash,
+        role: 'student',
+        status: status || 'active',
+        emailVerifiedAt: emailVerified ? new Date() : null,
+        twofaEnabled: false,
+      },
+      { transaction }
+    );
+
+    for (const item of enrollments) {
+      const { courseId, days, expiresAt, validityMode } = item;
+      const course = await Course.findByPk(courseId, { transaction });
+      if (!course) {
+        throw new ApiError(404, 'NOT_FOUND', `Course #${courseId} not found.`);
+      }
+
+      let calculatedExpiresAt;
+      if (validityMode === 'date' && expiresAt && !isNaN(new Date(expiresAt).getTime())) {
+        calculatedExpiresAt = new Date(expiresAt);
+      } else {
+        const daysCount = days && Number.isInteger(Number(days)) && Number(days) > 0 ? Number(days) : 30;
+        calculatedExpiresAt = new Date(Date.now() + daysCount * MS_PER_DAY);
+      }
+
+      await Enrollment.update(
+        { status: 'expired' },
+        {
+          where: {
+            userId: user.id,
+            courseId,
+            status: 'active',
+          },
+          transaction,
+        }
+      );
+
+      await Enrollment.create(
+        {
+          userId: user.id,
+          courseId,
+          orderId: null,
+          source: 'manual',
+          startsAt: new Date(),
+          expiresAt: calculatedExpiresAt,
+          status: 'active',
+        },
+        { transaction }
+      );
+    }
+
+    return user;
+  });
+
+  if (sendWelcomeEmail) {
+    const loginUrl = `${env.APP_URL}/login`;
+    await sendMail({
+      to: normalizedEmail,
+      subject: 'Welcome to SAMS Academy - Your Account Details',
+      text:
+        `Hi ${name.trim()},\n\n` +
+        `Your student account for SAMS Academy has been created by an administrator.\n\n` +
+        `Login Details:\n` +
+        `Email: ${normalizedEmail}\n` +
+        `Password: ${password}\n\n` +
+        `You can sign in to your student portal here:\n` +
+        `${loginUrl}\n\n` +
+        `For security, we recommend changing your password after your first login.`,
+      html:
+        `<p>Hi ${name.trim()},</p>` +
+        `<p>Your student account for SAMS Academy has been created by an administrator.</p>` +
+        `<p><strong>Login Details:</strong><br/>` +
+        `Email: ${normalizedEmail}<br/>` +
+        `Password: ${password}</p>` +
+        `<p><a href="${loginUrl}">Click here to sign in to your student portal</a></p>` +
+        `<p>For security, we recommend changing your password after your first login.</p>`,
+    });
+  }
+
+  const createdEnrollments = await Enrollment.findAll({
+    where: { userId: createdUser.id },
+    include: [{ model: Course, as: 'course' }],
+    order: [['id', 'DESC']],
+  });
+
+  return {
+    ...serializeUser(createdUser),
+    activeDevicesCount: 0,
+    enrollments: createdEnrollments.map(serializeEnrollment),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PUT /admin/students/:id — Full Student Profile Update
+// ---------------------------------------------------------------------------
+
+/**
+ * Updates a student's profile information, status, email verification, or password.
+ */
+export async function updateStudentProfile(id, { name, email, phone, status, emailVerified, password, adminUserId: _adminUserId }) {
+  const student = await assertStudentExists(id);
+
+  if (email !== undefined && email !== null) {
+    const normalizedEmail = email.toLowerCase().trim();
+    if (normalizedEmail !== student.email) {
+      const existing = await User.findOne({
+        where: {
+          email: normalizedEmail,
+          id: { [Op.ne]: id },
+        },
+      });
+      if (existing) {
+        throw new ApiError(409, 'EMAIL_EXISTS', 'A user with this email address already exists.');
+      }
+      student.email = normalizedEmail;
+    }
+  }
+
+  if (name !== undefined && name !== null) {
+    student.name = name.trim();
+  }
+
+  if (phone !== undefined) {
+    student.phone = phone && phone.trim() ? phone.trim() : null;
+  }
+
+  if (status !== undefined && status !== null) {
+    student.status = status;
+  }
+
+  if (typeof emailVerified === 'boolean') {
+    student.emailVerifiedAt = emailVerified ? (student.emailVerifiedAt || new Date()) : null;
+  }
+
+  if (password && typeof password === 'string' && password.trim().length >= 8) {
+    student.passwordHash = await bcrypt.hash(password.trim(), BCRYPT_ROUNDS);
+  }
+
+  await student.save();
+
+  return getStudentById(id);
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /admin/students/:id — Smart Student Account Deletion
+// ---------------------------------------------------------------------------
+
+/**
+ * Deletes a student account if they have no financial or exam history.
+ * If orders or test sessions exist, anonymizes the account to preserve records.
+ */
+export async function deleteOrAnonymizeStudent(id) {
+  const student = await assertStudentExists(id);
+
+  const ordersCount = await Order.count({ where: { userId: id } });
+  const testSessionsCount = await TestSession.count({ where: { userId: id } });
+
+  if (ordersCount > 0 || testSessionsCount > 0) {
+    return anonymizeStudentAccount(id);
+  }
+
+  await sequelize.transaction(async (transaction) => {
+    await Enrollment.destroy({ where: { userId: id }, transaction });
+    await UserDevice.destroy({ where: { userId: id }, transaction });
+    await RefreshToken.destroy({ where: { userId: id }, transaction });
+    if (db.OneTimeToken) await db.OneTimeToken.destroy({ where: { userId: id }, transaction });
+    if (db.LoginEvent) await db.LoginEvent.destroy({ where: { userId: id }, transaction });
+    if (db.Notification) await db.Notification.destroy({ where: { userId: id }, transaction });
+    if (db.LectureProgress) await db.LectureProgress.destroy({ where: { userId: id }, transaction });
+    if (db.LectureBookmark) await db.LectureBookmark.destroy({ where: { userId: id }, transaction });
+    if (db.PlaybackSession) await db.PlaybackSession.destroy({ where: { userId: id }, transaction });
+    if (db.QuestionBookmark) await db.QuestionBookmark.destroy({ where: { userId: id }, transaction });
+    if (db.UserQuestionHistory) await db.UserQuestionHistory.destroy({ where: { userId: id }, transaction });
+    if (db.UserDailyStat) await db.UserDailyStat.destroy({ where: { userId: id }, transaction });
+    await student.destroy({ transaction });
+  });
+
+  return { success: true, message: 'Student account deleted successfully.' };
+}
+
 export default {
   listAllStudents,
   getStudentById,
+  createStudentManually,
+  updateStudentProfile,
+  deleteOrAnonymizeStudent,
   updateStudentStatus,
   listDevicesForStudent,
   resetDevicesForStudent,

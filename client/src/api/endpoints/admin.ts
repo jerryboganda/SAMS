@@ -8,7 +8,9 @@ import {
   ContactMessage,
   Coupon,
   Course,
+  CourseAllocationItem,
   CourseSection,
+  CreateStudentPayload,
   Enrollment,
   FacultyMember,
   FAQ,
@@ -19,6 +21,7 @@ import {
   PaymentEvent,
   Question,
   Subject,
+  UpdateStudentPayload,
   User,
   UserDevice,
 } from "../../types";
@@ -92,6 +95,176 @@ export const adminApi = {
       return user || MOCK_USERS[0];
     }
     return apiFetch<User>(`/admin/students/${studentId}`);
+  },
+
+  async createStudent(payload: CreateStudentPayload): Promise<User & { enrollments?: Enrollment[] }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 350);
+      const emailTrimmed = payload.email.toLowerCase().trim();
+      const existing = MOCK_USERS.find((u) => u.email.toLowerCase() === emailTrimmed);
+      if (existing) {
+        throw new Error("A user with this email address already exists.");
+      }
+
+      const newStudent: User = {
+        id: Date.now(),
+        name: payload.name.trim(),
+        email: emailTrimmed,
+        phone: payload.phone?.trim() || undefined,
+        role: "student",
+        status: payload.status || "active",
+        emailVerifiedAt: payload.emailVerified !== false ? new Date().toISOString() : undefined,
+        twofaEnabled: false,
+        activeDevicesCount: 0,
+        createdAt: new Date().toISOString(),
+      };
+      MOCK_USERS.unshift(newStudent);
+
+      const createdEnrollments: Enrollment[] = [];
+      for (const item of payload.enrollments || []) {
+        const course = MOCK_COURSES.find((c) => c.id === Number(item.courseId));
+        let expiresAtStr: string;
+        if (item.validityMode === "date" && item.expiresAt) {
+          expiresAtStr = new Date(item.expiresAt).toISOString();
+        } else {
+          const days = item.days || course?.validityDays || 30;
+          expiresAtStr = new Date(Date.now() + days * 86400000).toISOString();
+        }
+        const newEnrollment: Enrollment = {
+          id: Date.now() + Math.floor(Math.random() * 1000),
+          userId: newStudent.id,
+          userName: newStudent.name,
+          userEmail: newStudent.email,
+          courseId: Number(item.courseId),
+          courseTitle: course?.title || `Course #${item.courseId}`,
+          courseThumbnail: course?.thumbnailUrl,
+          courseSlug: course?.slug,
+          source: "manual",
+          startsAt: new Date().toISOString(),
+          expiresAt: expiresAtStr,
+          status: "active",
+        };
+        MOCK_ENROLLMENTS.unshift(newEnrollment);
+        createdEnrollments.push(newEnrollment);
+      }
+
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "student.create",
+        entityType: "User",
+        entityId: newStudent.id,
+        summary: `Manually registered student "${newStudent.name}" (${newStudent.email})`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+
+      return {
+        ...newStudent,
+        enrollments: createdEnrollments,
+      };
+    }
+    return apiFetch<User & { enrollments?: Enrollment[] }>("/admin/students", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateStudent(id: number | string, payload: UpdateStudentPayload): Promise<User> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 300);
+      const student = MOCK_USERS.find((u) => u.id === Number(id));
+      if (!student) {
+        throw new Error("Student not found");
+      }
+
+      if (payload.email) {
+        const emailTrimmed = payload.email.toLowerCase().trim();
+        if (emailTrimmed !== student.email.toLowerCase()) {
+          const conflict = MOCK_USERS.find((u) => u.id !== Number(id) && u.email.toLowerCase() === emailTrimmed);
+          if (conflict) {
+            throw new Error("A user with this email address already exists.");
+          }
+          student.email = emailTrimmed;
+        }
+      }
+
+      if (payload.name !== undefined) {
+        student.name = payload.name.trim();
+      }
+      if (payload.phone !== undefined) {
+        student.phone = payload.phone?.trim() || undefined;
+      }
+      if (payload.status !== undefined) {
+        student.status = payload.status;
+      }
+      if (payload.emailVerified !== undefined) {
+        student.emailVerifiedAt = payload.emailVerified ? new Date().toISOString() : undefined;
+      }
+
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "student.update",
+        entityType: "User",
+        entityId: Number(id),
+        summary: `Updated student profile #${id}`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+
+      return student;
+    }
+    return apiFetch<User>(`/admin/students/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteStudent(id: number | string): Promise<{ success: boolean; message?: string }> {
+    if (CONFIG.USE_MOCK) {
+      await mockLatency(null, 350);
+      const hasOrders = MOCK_ORDERS.some((o) => o.userId === Number(id));
+      if (hasOrders) {
+        const student = MOCK_USERS.find((u) => u.id === Number(id));
+        if (student) {
+          student.name = "Deleted user";
+          student.email = `deleted-user-${id}@anonymized.invalid`;
+          student.phone = undefined;
+          student.status = "suspended";
+        }
+      } else {
+        const idx = MOCK_USERS.findIndex((u) => u.id === Number(id));
+        if (idx !== -1) {
+          MOCK_USERS.splice(idx, 1);
+        }
+        delete MOCK_STUDENT_DEVICES[Number(id)];
+        for (let i = MOCK_ENROLLMENTS.length - 1; i >= 0; i--) {
+          if (MOCK_ENROLLMENTS[i].userId === Number(id)) {
+            MOCK_ENROLLMENTS.splice(i, 1);
+          }
+        }
+      }
+
+      MOCK_AUDIT_LOGS.unshift({
+        id: Date.now(),
+        actorUserId: 2,
+        actorName: "Dr. Zabih Ullah (Admin)",
+        action: "student.delete",
+        entityType: "User",
+        entityId: Number(id),
+        summary: `Deleted or anonymized student #${id}`,
+        ip: "182.180.122.45",
+        createdAt: new Date().toISOString(),
+      });
+
+      return { success: true, message: "Student account deleted or anonymized." };
+    }
+    return apiFetch<{ success: boolean; message?: string }>(`/admin/students/${id}`, {
+      method: "DELETE",
+    });
   },
 
   async updateStudentStatus(studentId: number | string, status: "active" | "suspended"): Promise<User> {

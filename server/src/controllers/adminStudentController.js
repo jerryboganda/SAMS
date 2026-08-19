@@ -14,6 +14,36 @@ const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
 
 const statusBodySchema = z.object({ status: z.enum(['active', 'suspended']) });
 
+const createStudentBodySchema = z.object({
+  name: z.string().trim().min(2, 'Name must be at least 2 characters').max(120, 'Name cannot exceed 120 characters'),
+  email: z.string().trim().email('Invalid email address'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  phone: z.string().trim().nullable().optional(),
+  status: z.enum(['active', 'pending', 'suspended']).default('active'),
+  emailVerified: z.boolean().default(true),
+  enrollments: z
+    .array(
+      z.object({
+        courseId: z.coerce.number().int().positive(),
+        days: z.coerce.number().int().positive().optional(),
+        expiresAt: z.string().optional(),
+        validityMode: z.enum(['days', 'date']).optional(),
+      })
+    )
+    .optional()
+    .default([]),
+  sendWelcomeEmail: z.boolean().optional().default(false),
+});
+
+const updateStudentBodySchema = z.object({
+  name: z.string().trim().min(2, 'Name must be at least 2 characters').max(120, 'Name cannot exceed 120 characters').optional(),
+  email: z.string().trim().email('Invalid email address').optional(),
+  phone: z.string().trim().nullable().optional(),
+  status: z.enum(['active', 'pending', 'suspended']).optional(),
+  emailVerified: z.boolean().optional(),
+  password: z.string().min(8, 'Password must be at least 8 characters').optional(),
+});
+
 const grantEnrollmentBodySchema = z.object({
   courseId: z.coerce.number().int().positive(),
   days: z.coerce.number().int().positive(),
@@ -36,6 +66,31 @@ export const getStudent = asyncHandler(async (req, res) => {
   const { id } = validateBody(idParamSchema, req.params);
   const data = await adminStudentService.getStudentById(id);
   ok(res, data);
+});
+
+export const createStudent = asyncHandler(async (req, res) => {
+  const body = validateBody(createStudentBodySchema, req.body);
+  const data = await adminStudentService.createStudentManually({
+    ...body,
+    adminUserId: req.user.id,
+  });
+  ok(res, data, 201);
+});
+
+export const updateStudent = asyncHandler(async (req, res) => {
+  const { id } = validateBody(idParamSchema, req.params);
+  const body = validateBody(updateStudentBodySchema, req.body);
+  const data = await adminStudentService.updateStudentProfile(id, {
+    ...body,
+    adminUserId: req.user.id,
+  });
+  ok(res, data, 200);
+});
+
+export const deleteStudent = asyncHandler(async (req, res) => {
+  const { id } = validateBody(idParamSchema, req.params);
+  const data = await adminStudentService.deleteOrAnonymizeStudent(id);
+  ok(res, data, 200);
 });
 
 export const updateStatus = asyncHandler(async (req, res) => {
@@ -91,6 +146,9 @@ export const grantEnrollment = asyncHandler(async (req, res) => {
 export default {
   listStudents,
   getStudent,
+  createStudent,
+  updateStudent,
+  deleteStudent,
   updateStatus,
   listDevices,
   resetDevices,

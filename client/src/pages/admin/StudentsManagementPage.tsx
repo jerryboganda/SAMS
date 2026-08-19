@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   Lock,
   Clock,
+  Edit,
 } from "lucide-react";
 import {
   Card,
@@ -33,6 +34,11 @@ import {
   ConfirmDialog,
   Tabs,
 } from "../../components/ui";
+import {
+  AddStudentModal,
+  EditStudentModal,
+  PostCreateCredentialsModal,
+} from "../../components/admin";
 import { adminApi } from "../../api/endpoints/admin";
 import { User, UserDevice, LoginEvent, Order, Enrollment, Course } from "../../types";
 import { formatPKR, formatDate } from "../../utils/formatters";
@@ -49,6 +55,17 @@ export const StudentsManagementPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [toast, setToast] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(true);
+
+  // Modal States
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<User | null>(null);
+  const [createdCredentialsData, setCreatedCredentialsData] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    enrollments: { courseTitle: string; expiresAt: string }[];
+  } | null>(null);
 
   // Detail View State
   const [activeTab, setActiveTab] = useState<"overview" | "enrollments" | "devices" | "activity" | "orders">("overview");
@@ -79,8 +96,14 @@ export const StudentsManagementPage: React.FC = () => {
   const loadStudents = async () => {
     setLoading(true);
     try {
-      const data = await adminApi.getStudents();
+      const [data, crs] = await Promise.all([
+        adminApi.getStudents(),
+        courses.length === 0 ? adminApi.getCourses() : Promise.resolve(courses),
+      ]);
       setStudents(data);
+      if (courses.length === 0) {
+        setCourses(crs);
+      }
 
       if (urlStudentId) {
         const found = data.find((s) => s.id === Number(urlStudentId));
@@ -274,6 +297,17 @@ export const StudentsManagementPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              icon={<Edit className="w-4 h-4 text-slate-600" />}
+              onClick={() => {
+                setEditingStudent(selectedStudent);
+                setIsEditModalOpen(true);
+              }}
+            >
+              Edit Profile
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -735,6 +769,42 @@ export const StudentsManagementPage: React.FC = () => {
             setRevokeTarget(null);
           }}
         />
+
+        {/* Modals */}
+        <AddStudentModal
+          isOpen={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          courses={courses}
+          onCreated={(newStudent, creds) => {
+            setStudents((prev) => [newStudent, ...prev]);
+            setCreatedCredentialsData(creds);
+            setToast(`Candidate ${newStudent.name} registered successfully.`);
+          }}
+        />
+
+        <EditStudentModal
+          isOpen={isEditModalOpen}
+          onClose={() => {
+            setIsEditModalOpen(false);
+            setEditingStudent(null);
+          }}
+          student={editingStudent}
+          onUpdated={(updatedStudent) => {
+            setStudents((prev) =>
+              prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s))
+            );
+            if (selectedStudent?.id === updatedStudent.id) {
+              setSelectedStudent(updatedStudent);
+            }
+            setToast(`Updated student profile for ${updatedStudent.name}.`);
+          }}
+        />
+
+        <PostCreateCredentialsModal
+          isOpen={Boolean(createdCredentialsData)}
+          onClose={() => setCreatedCredentialsData(null)}
+          data={createdCredentialsData}
+        />
       </div>
     );
   }
@@ -757,6 +827,13 @@ export const StudentsManagementPage: React.FC = () => {
             Search candidates, manage account statuses, review login security, and reset device limits.
           </p>
         </div>
+        <Button
+          variant="teal"
+          icon={<Plus className="w-4 h-4" />}
+          onClick={() => setIsAddModalOpen(true)}
+        >
+          Add New Student
+        </Button>
       </div>
 
       <Card className="p-6 border-slate-200 space-y-4">
@@ -835,6 +912,16 @@ export const StudentsManagementPage: React.FC = () => {
                     <Button
                       size="xs"
                       variant="outline"
+                      onClick={() => {
+                        setEditingStudent(s);
+                        setIsEditModalOpen(true);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="teal"
                       onClick={() => navigate(`/admin/students/${s.id}`)}
                     >
                       Manage
@@ -848,6 +935,42 @@ export const StudentsManagementPage: React.FC = () => {
           />
         )}
       </Card>
+
+      {/* Modals */}
+      <AddStudentModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        courses={courses}
+        onCreated={(newStudent, creds) => {
+          setStudents((prev) => [newStudent, ...prev]);
+          setCreatedCredentialsData(creds);
+          setToast(`Candidate ${newStudent.name} registered successfully.`);
+        }}
+      />
+
+      <EditStudentModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingStudent(null);
+        }}
+        student={editingStudent}
+        onUpdated={(updatedStudent) => {
+          setStudents((prev) =>
+            prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s))
+          );
+          if (selectedStudent?.id === updatedStudent.id) {
+            setSelectedStudent(updatedStudent);
+          }
+          setToast(`Updated student profile for ${updatedStudent.name}.`);
+        }}
+      />
+
+      <PostCreateCredentialsModal
+        isOpen={Boolean(createdCredentialsData)}
+        onClose={() => setCreatedCredentialsData(null)}
+        data={createdCredentialsData}
+      />
     </div>
   );
 };

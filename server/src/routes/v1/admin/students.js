@@ -14,7 +14,32 @@ import { audit } from '../../../middleware/audit.js';
 const router = Router();
 
 router.get('/students', adminStudentController.listStudents);
+router.post(
+  '/students',
+  audit('student.create', 'User', {
+    entityId: (req, body) => body?.data?.id ?? null,
+    summary: (req) => `Manually registered student "${req.body?.name}" (${req.body?.email})`,
+  }),
+  adminStudentController.createStudent
+);
+
 router.get('/students/:id', adminStudentController.getStudent);
+router.put(
+  '/students/:id',
+  audit('student.update', 'User', {
+    entityId: (req) => Number(req.params.id),
+    summary: (req) => `Updated student profile #${req.params.id}`,
+  }),
+  adminStudentController.updateStudent
+);
+router.delete(
+  '/students/:id',
+  audit('student.delete', 'User', {
+    entityId: (req) => Number(req.params.id),
+    summary: (req) => `Deleted or anonymized student #${req.params.id}`,
+  }),
+  adminStudentController.deleteStudent
+);
 
 router.patch(
   '/students/:id/status',
